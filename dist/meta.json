@@ -1,0 +1,46 @@
+{
+	"inputs": {
+		"src/guardian.css": {
+			"bytes": 5592,
+			"imports": []
+		},
+		"src/client.jsx": {
+			"bytes": 19888,
+			"imports": [
+				{
+					"path": "react",
+					"kind": "import-statement",
+					"external": true
+				},
+				{
+					"path": "src/guardian.css",
+					"kind": "import-statement",
+					"original": "./guardian.css"
+				}
+			],
+			"format": "esm"
+		}
+	},
+	"outputs": {
+		"dist/client.js": {
+			"imports": [
+				{
+					"path": "react",
+					"kind": "require-call",
+					"external": true
+				}
+			],
+			"exports": [],
+			"entryPoint": "src/client.jsx",
+			"inputs": {
+				"src/client.jsx": {
+					"bytesInOutput": 17543
+				},
+				"src/guardian.css": {
+					"bytesInOutput": 5651
+				}
+			},
+			"bytes": 23921
+		}
+	}
+}

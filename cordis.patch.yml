@@ -1,0 +1,4 @@
+# @supertiny99/dsh-plugin-guardian bundle patch
+- insert:
+    - id: plugin-guardian
+      name: '@supertiny99/dsh-plugin-guardian'

@@ -23,6 +23,7 @@ import {
 	deleteSnapshot,
 	cleanOldSnapshots,
 	restoreBundles,
+	toggleBundleState,
 	restorePatch,
 	generateOfflineScript,
 	GUARDIAN_BUNDLE_NAME,
@@ -204,7 +205,31 @@ try {
 	assert.equal(snapsAfterClean.length, 2);
 	console.log(`  ✔ 一键清理成功，保留了 ${snapsAfterClean.length} 份最新快照！`);
 
-	console.log('\n🎉 全部 8 项 Host 核心逻辑测试通过！100% 达成预期！');
+	// 9. 测试手动关闭与手动激活插件功能
+	console.log('\nStep 8: 测试手动关闭与手动激活指定插件...');
+	// 9.1 手动关闭 dsh-ui-gallery
+	const closeRes = toggleBundleState(tmpProfile, 'dsh-ui-gallery', false);
+	assert.equal(closeRes.ok, true);
+	const pkgAfterClose = JSON.parse(fs.readFileSync(path.join(tmpProfile, 'package.json'), 'utf8'));
+	assert.ok(!pkgAfterClose.dsh.profile.bundles.includes('dsh-ui-gallery'), 'ui-gallery 应当已被手动关闭移出 bundles');
+	console.log('  ✔ 手动关闭插件成功：已从 bundles 移除');
+
+	// 9.2 手动重新激活 dsh-ui-gallery
+	const activateRes = toggleBundleState(tmpProfile, 'dsh-ui-gallery', true);
+	assert.equal(activateRes.ok, true);
+	const pkgAfterActivate = JSON.parse(fs.readFileSync(path.join(tmpProfile, 'package.json'), 'utf8'));
+	assert.ok(pkgAfterActivate.dsh.profile.bundles.includes('dsh-ui-gallery'), 'ui-gallery 应当已重新被手动激活加入 bundles');
+	console.log('  ✔ 手动激活插件成功：已加入 bundles');
+
+	// 9.3 测试保护插件管家自身不可关闭
+	assert.throws(
+		() => toggleBundleState(tmpProfile, GUARDIAN_BUNDLE_NAME, false),
+		/不可手动关闭/,
+		'关闭插件管家自身应当被拒绝抛错'
+	);
+	console.log('  ✔ 插件管家自身保护逻辑生效：拒绝关闭自身');
+
+	console.log('\n🎉 全部 9 项 Host 核心逻辑测试通过！100% 达成预期！');
 } catch (err) {
 	console.error('❌ 测试失败:', err);
 	process.exit(1);

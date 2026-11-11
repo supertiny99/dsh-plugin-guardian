@@ -179,10 +179,33 @@ function GuardianPanel() {
 			});
 			const result = await res.json();
 			if (result.ok) {
-				showToast('恢复写入成功！请完全退出并重启 DSH 生效');
+				showToast('快照恢复写入成功！请完全退出并重启 DSH 生效');
 				await fetchStatus();
 			} else {
 				showToast('恢复失败: ' + (result.error || '未知错误'));
+			}
+		} catch (err) {
+			showToast('请求失败: ' + err.message);
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const handleToggleBundle = async (bundle, enabled) => {
+		try {
+			setBusy(true);
+			const res = await fetch('/plugin-guardian/toggle-bundle', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ bundle, enabled }),
+			});
+			const result = await res.json();
+			if (result.ok) {
+				const actionText = enabled ? '已手动激活' : '已手动关闭';
+				showToast(`${actionText} ${bundle}！请完全退出并重启 DSH 生效`);
+				await fetchStatus();
+			} else {
+				showToast('操作失败: ' + (result.error || '未知错误'));
 			}
 		} catch (err) {
 			showToast('请求失败: ' + err.message);
@@ -462,17 +485,38 @@ function GuardianPanel() {
 					</div>
 
 					<div className="pg-list" style={{ marginTop: 8 }}>
-						{currentThird.map((bundle) => (
-							<div key={bundle} className="pg-row">
-								<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-									<IconPackage size={15} />
-									<span className="pg-row-name">{bundle}</span>
+						{currentThird.map((bundle) => {
+							const isSelf = bundle === '@supertiny99/dsh-plugin-guardian' || bundle === 'dsh-plugin-guardian';
+							return (
+								<div key={bundle} className="pg-row">
+									<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+										<IconPackage size={15} />
+										<span className="pg-row-name">{bundle}</span>
+									</div>
+									<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+										<span className="pg-plugin-tag" style={{ background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
+											已激活
+										</span>
+										{isSelf ? (
+											<span style={{ fontSize: 12, color: 'var(--dsw-alias-text-tertiary)', padding: '2px 6px' }} title="插件管家正在守护系统，不可在此关闭">
+												守护中
+											</span>
+										) : (
+											<button
+												className="pg-btn"
+												style={{ padding: '3px 8px', fontSize: 12 }}
+												onClick={() => handleToggleBundle(bundle, false)}
+												disabled={busy}
+												title="将该插件从激活列表中移除（手动关闭）"
+											>
+												<IconPower size={12} />
+												<span>手动关闭</span>
+											</button>
+										)}
+									</div>
 								</div>
-								<span className="pg-plugin-tag" style={{ background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
-									已激活
-								</span>
-							</div>
-						))}
+							);
+						})}
 						{currentThird.length === 0 && (
 							<div style={{ padding: '12px 0', fontSize: 13, color: 'var(--dsw-alias-text-tertiary)' }}>
 								暂无已激活的第三方插件。
@@ -495,12 +539,13 @@ function GuardianPanel() {
 										<span className="pg-row-name">{pkg}</span>
 									</div>
 									<button
-										className="pg-btn"
-										style={{ padding: '4px 10px', fontSize: 12 }}
-										onClick={() => handleRestore([...currentThird, pkg], false)}
+										className="pg-btn pg-btn-primary"
+										style={{ padding: '3px 10px', fontSize: 12 }}
+										onClick={() => handleToggleBundle(pkg, true)}
 										disabled={busy}
+										title="将该插件加入激活列表（手动激活）"
 									>
-										一键激活此插件
+										<span>手动激活</span>
 									</button>
 								</div>
 							))}

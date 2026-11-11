@@ -15,6 +15,7 @@ import {
 	deleteSnapshot,
 	cleanOldSnapshots,
 	restoreBundles,
+	toggleBundleState,
 	restorePatch,
 	generateOfflineScript,
 } from './guardian-core.js';
@@ -113,6 +114,20 @@ export function apply(ctx, config) {
 							}
 							const result = restoreBundles(profileDir, selected, !!body.restorePatch);
 							return json(200, result);
+						}
+
+						// 4.1 手动启用或停用单个插件
+						if (pathname === '/toggle-bundle' && req.method === 'POST') {
+							const body = await parseBody(req);
+							if (!body.bundle) {
+								return json(400, { ok: false, error: 'bundle is required' });
+							}
+							try {
+								const result = toggleBundleState(profileDir, body.bundle, !!body.enabled);
+								return json(200, result);
+							} catch (e) {
+								return json(400, { ok: false, error: e.message });
+							}
 						}
 
 						// 5. 挽回 patch.bak 配置

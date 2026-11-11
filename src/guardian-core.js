@@ -400,6 +400,58 @@ export function restoreBundles(profileDir, selectedBundles, restorePatchFlag = f
 }
 
 /**
+ * 手动启用或关闭指定插件
+ * @param {string} profileDir
+ * @param {string} bundleName 插件包名
+ * @param {boolean} enabled 是否激活
+ */
+export function toggleBundleState(profileDir, bundleName, enabled) {
+	if (!bundleName) {
+		throw new Error('bundleName is required');
+	}
+
+	// 保护插件管家自身，防止在自身面板中关闭自己导致无法再次进入
+	if (!enabled && (bundleName === GUARDIAN_BUNDLE_NAME || bundleName === LEGACY_GUARDIAN_NAME)) {
+		throw new Error('插件管家为系统守护组件，不可手动关闭');
+	}
+
+	const manifest = readProfileManifest(profileDir);
+	const existingBundles = manifest.dsh?.profile?.bundles || [];
+	let newBundles = [...existingBundles];
+
+	if (enabled) {
+		if (!newBundles.includes(bundleName)) {
+			newBundles.push(bundleName);
+		}
+	} else {
+		newBundles = newBundles.filter((b) => b !== bundleName);
+	}
+
+	// 始终保证 GUARDIAN_BUNDLE_NAME 处于开启状态
+	if (!newBundles.includes(GUARDIAN_BUNDLE_NAME) && !newBundles.includes(LEGACY_GUARDIAN_NAME)) {
+		newBundles.push(GUARDIAN_BUNDLE_NAME);
+	}
+
+	manifest.dsh = manifest.dsh || {};
+	manifest.dsh.profile = manifest.dsh.profile || {};
+	manifest.dsh.profile.bundles = newBundles;
+
+	writeProfileManifestAtomic(profileDir, manifest);
+
+	// 创建快照记录此次手动变更
+	createSnapshot(profileDir, enabled ? 'manual_activate' : 'manual_deactivate');
+
+	return {
+		ok: true,
+		bundle: bundleName,
+		enabled,
+		currentBundles: newBundles,
+		needRestart: true,
+	};
+}
+
+
+/**
  * 挽回指定的 cordis.patch.yml.bak 文件
  */
 export function restorePatch(profileDir, bakFileName) {

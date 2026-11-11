@@ -118,6 +118,24 @@ const IconPower = ({ size = 14 }) => (
 	</SvgIcon>
 );
 
+/* ---------- 操作类型与原因转义字典 ---------- */
+
+const REASON_LABELS = {
+	startup_auto: '宿主启动自动记录',
+	manual: '用户手动创建',
+	after_recovery: '灾难恢复后自动备份',
+	manual_activate: '手动激活插件',
+	manual_deactivate: '手动关闭插件',
+	pre_install: '安装前快照',
+	clean_retained: '清理后保留快照',
+};
+
+function formatReason(reason, fallbackText) {
+	if (fallbackText) return fallbackText;
+	if (!reason) return '日常快照';
+	return REASON_LABELS[reason] || reason;
+}
+
 /* ---------- 主面板组件 ---------- */
 
 function GuardianPanel() {
@@ -478,7 +496,10 @@ function GuardianPanel() {
 						当前共激活 <strong>{status?.currentBundles?.length || 0}</strong> 个组合行（含{' '}
 						<strong>{currentThird.length}</strong> 个第三方插件）。
 						{status?.latestHealthy ? (
-							<span> 最近健康快照建立于：<strong>{status.latestHealthy.timeString}</strong>。</span>
+							<span>
+								{' '}最近健康快照建立于：<strong>{status.latestHealthy.timeString}</strong>
+								（{formatReason(status.latestHealthy.reason, status.latestHealthy.reasonText)}）。
+							</span>
 						) : (
 							<span> 尚未建立健康基准快照。</span>
 						)}
@@ -622,8 +643,13 @@ function GuardianPanel() {
 												({snap.sizeText || (((status?.currentPatchSize || 0) + 1500) / 1024).toFixed(1) + ' KB'})
 											</span>
 										</div>
-										<div className="pg-row-meta">
-											原因: {snap.reason === 'startup_auto' ? '启动自动快照' : snap.reason === 'manual' ? '手动快照' : snap.reason} · 第三方插件数: {snap.thirdPartyCount}
+										<div className="pg-row-meta" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+											<span>触发操作:</span>
+											<span className="pg-reason-tag">
+												{formatReason(snap.reason, snap.reasonText)}
+											</span>
+											<span>·</span>
+											<span>第三方插件: {snap.thirdPartyCount} 个</span>
 										</div>
 									</div>
 								</div>

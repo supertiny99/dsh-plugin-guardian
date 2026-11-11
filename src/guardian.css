@@ -252,6 +252,18 @@
 	color: var(--dsw-alias-text-tertiary, #94a3b8);
 }
 
+.pg-reason-tag {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 6px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-weight: 500;
+	background: var(--dsw-alias-surface-raised, rgba(0, 0, 0, 0.05));
+	color: var(--dsw-alias-text-secondary, #475569);
+	border: 1px solid var(--dsw-alias-border-subtle, rgba(0, 0, 0, 0.08));
+}
+
 .pg-toast {
 	position: fixed;
 	bottom: 24px;

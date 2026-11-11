@@ -18,6 +18,24 @@ export const GUARDIAN_BUNDLE_NAME = '@supertiny99/dsh-plugin-guardian';
 export const LEGACY_GUARDIAN_NAME = 'dsh-plugin-guardian';
 export const OFFICIAL_PREFIX = '@deepseek-ai/';
 
+export const REASON_TEXT_MAP = {
+	startup_auto: '宿主启动自动记录',
+	manual: '用户手动创建',
+	after_recovery: '灾难恢复后自动备份',
+	manual_activate: '手动激活插件',
+	manual_deactivate: '手动关闭插件',
+	pre_install: '安装前快照',
+	clean_retained: '清理后保留快照',
+};
+
+/**
+ * 将快照触发操作/原因转义为中文描述
+ */
+export function translateReason(reason) {
+	if (!reason) return '日常快照';
+	return REASON_TEXT_MAP[reason] || reason;
+}
+
 /**
  * 确定当前 profile 目录
  */
@@ -202,6 +220,7 @@ export function listSnapshots(profileDir) {
 						timestamp: data.timestamp,
 						timeString: data.timeString,
 						reason: data.reason,
+						reasonText: translateReason(data.reason),
 						size: stat.size,
 						sizeText: (stat.size / 1024).toFixed(1) + ' KB',
 						thirdPartyCount: data.thirdPartyBundles?.length || 0,
@@ -336,6 +355,7 @@ export function getGuardianStatus(profileDir) {
 					timestamp: latestHealthy.timestamp,
 					timeString: latestHealthy.timeString,
 					reason: latestHealthy.reason,
+					reasonText: translateReason(latestHealthy.reason),
 					thirdPartyBundles: latestHealthy.thirdPartyBundles,
 			  }
 			: null,

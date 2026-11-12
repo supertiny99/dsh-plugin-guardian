@@ -14,6 +14,7 @@ import {
 	readProfileManifest,
 	writeProfileManifestAtomic,
 	createSnapshot,
+	GUARDIAN_BUNDLE_NAME,
 } from './guardian-core.js';
 
 /**
@@ -182,5 +183,71 @@ export async function executePluginInstall(profileDir, rawSpec) {
 		preSnapshotId: preSnap?.id,
 		needRestart: true,
 		log: outputLog,
+	};
+}
+
+/**
+ * 执行插件彻底卸载流水线
+ * @param {string} profileDir Profile 根目录
+ * @param {string} pkgName 要卸载的包名（如 "dsh-pet"）
+ */
+export async function executePluginUninstall(profileDir, pkgName) {
+	if (!pkgName || typeof pkgName !== 'string') {
+		throw new Error('卸载目标包名不能为空');
+	}
+	const targetPkg = pkgName.trim();
+
+	// 1. 安全保护：核心底座与插件管家自身严禁卸载
+	if (
+		targetPkg === GUARDIAN_BUNDLE_NAME ||
+		targetPkg === 'dsh-plugin-guardian' ||
+		targetPkg.startsWith('@deepseek-ai/')
+	) {
+		throw new Error(`安全保护：禁止卸载核心组件或插件管家自身 (${targetPkg})`);
+	}
+
+	// 2. 卸载前强制健康快照 (Pre-uninstall Snapshot)
+	const preSnap = createSnapshot(profileDir, 'pre_uninstall');
+
+	// 3. 更新 package.json：从 bundles 中移除，从 dependencies 中移除
+	const manifest = readProfileManifest(profileDir);
+	let bundlesModified = false;
+	let depsModified = false;
+
+	if (manifest.dsh?.profile?.bundles && Array.isArray(manifest.dsh.profile.bundles)) {
+		const beforeCount = manifest.dsh.profile.bundles.length;
+		manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter((b) => b !== targetPkg);
+		if (manifest.dsh.profile.bundles.length !== beforeCount) {
+			bundlesModified = true;
+		}
+	}
+
+	if (manifest.dependencies && manifest.dependencies[targetPkg]) {
+		delete manifest.dependencies[targetPkg];
+		depsModified = true;
+	}
+
+	if (bundlesModified || depsModified) {
+		writeProfileManifestAtomic(profileDir, manifest);
+	}
+
+	// 4. 清理 node_modules 中的包文件/软链目录
+	const targetDir = path.join(profileDir, 'node_modules', ...targetPkg.split('/'));
+	try {
+		if (fs.existsSync(targetDir)) {
+			fs.rmSync(targetDir, { recursive: true, force: true });
+		}
+	} catch (e) {
+		// 容忍非致命清理失败
+	}
+
+	// 5. 记录卸载后快照
+	createSnapshot(profileDir, 'after_uninstall');
+
+	return {
+		ok: true,
+		uninstalledPackage: targetPkg,
+		preSnapshotId: preSnap?.id,
+		needRestart: true,
 	};
 }

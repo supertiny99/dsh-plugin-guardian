@@ -98,6 +98,21 @@
 	border-color: transparent;
 }
 
+.pg-btn-danger:hover:not(:disabled) {
+	background: #dc2626;
+}
+
+.pg-btn-danger-outline {
+	background: transparent;
+	color: var(--dsw-alias-intent-danger, #ef4444);
+	border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.pg-btn-danger-outline:hover:not(:disabled) {
+	background: rgba(239, 68, 68, 0.08);
+	border-color: var(--dsw-alias-intent-danger, #ef4444);
+}
+
 .pg-content {
 	padding: 24px 28px;
 	display: flex;

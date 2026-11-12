@@ -21,7 +21,7 @@ import {
 	generateOfflineScript,
 } from './guardian-core.js';
 import { getEnrichedCatalog } from './catalog.js';
-import { chooseLocalTgzFile, executePluginInstall } from './installer-core.js';
+import { chooseLocalTgzFile, executePluginInstall, executePluginUninstall } from './installer-core.js';
 import path from 'node:path';
 import os from 'node:os';
 import { exec } from 'node:child_process';
@@ -180,6 +180,20 @@ export function apply(ctx, config) {
 							}
 							try {
 								const result = await executePluginInstall(profileDir, body.spec);
+								return json(200, result);
+							} catch (e) {
+								return json(500, { ok: false, error: e.message });
+							}
+						}
+
+						// 10. 执行插件彻底卸载（卸载前强制健康快照）
+						if (pathname === '/uninstall' && req.method === 'POST') {
+							const body = await parseBody(req);
+							if (!body.packageName) {
+								return json(400, { ok: false, error: 'packageName is required' });
+							}
+							try {
+								const result = await executePluginUninstall(profileDir, body.packageName);
 								return json(200, result);
 							} catch (e) {
 								return json(500, { ok: false, error: e.message });

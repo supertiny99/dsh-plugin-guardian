@@ -163,6 +163,8 @@ const REASON_LABELS = {
 	manual_deactivate: '手动关闭插件',
 	pre_install: '安装前快照',
 	after_install: '安装插件后记录',
+	pre_uninstall: '卸载前快照',
+	after_uninstall: '卸载插件后记录',
 	clean_retained: '清理后保留快照',
 };
 
@@ -190,6 +192,10 @@ function GuardianPanel() {
 	const [localFile, setLocalFile] = useState(null);
 	const [customSpec, setCustomSpec] = useState('');
 	const [installing, setInstalling] = useState(false);
+
+	// 卸载确认模态框状态
+	const [uninstallTarget, setUninstallTarget] = useState(null);
+	const [uninstalling, setUninstalling] = useState(false);
 
 	const showToast = (msg) => {
 		setToastMsg(msg);
@@ -277,6 +283,30 @@ function GuardianPanel() {
 			showToast('请求安装失败: ' + err.message);
 		} finally {
 			setInstalling(false);
+		}
+	};
+
+	const handleUninstallPlugin = async (pkgName) => {
+		try {
+			setUninstalling(true);
+			const res = await fetch('/plugin-guardian/uninstall', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ packageName: pkgName }),
+			});
+			const data = await res.json();
+			if (data.ok) {
+				showToast(`已成功彻底卸载 ${pkgName}！请完全退出并重启 DSH 生效`);
+				setUninstallTarget(null);
+				await fetchStatus();
+				await fetchCatalog();
+			} else {
+				showToast('卸载失败: ' + (data.error || '未知错误'));
+			}
+		} catch (err) {
+			showToast('请求卸载失败: ' + err.message);
+		} finally {
+			setUninstalling(false);
 		}
 	};
 
@@ -602,10 +632,10 @@ function GuardianPanel() {
 					</div>
 				)}
 
-				{/* 状态总览卡片 */}
+				{/* 已启用的扩展插件 */}
 				<div className="pg-card">
 					<div className="pg-card-title">
-						<span>当前 Profile 插件运行状态</span>
+						<span>已启用的扩展插件 ({currentThird.length})</span>
 						<span className="pg-badge-healthy">
 							<span className="pg-dot" />
 							{isIncident ? '处于恢复排查模式' : '健康运行中'}
@@ -613,7 +643,7 @@ function GuardianPanel() {
 					</div>
 					<div style={{ fontSize: 13, color: 'var(--dsw-alias-text-secondary)', lineHeight: 1.6 }}>
 						当前共激活 <strong>{status?.currentBundles?.length || 0}</strong> 个组合行（含{' '}
-						<strong>{currentThird.length}</strong> 个第三方插件）。
+						<strong>{currentThird.length}</strong> 个第三方扩展插件）。
 						{status?.latestHealthy ? (
 							<span>
 								{' '}最近健康快照建立于：<strong>{status.latestHealthy.timeString}</strong>
@@ -638,20 +668,32 @@ function GuardianPanel() {
 											已激活
 										</span>
 										{isSelf ? (
-											<span style={{ fontSize: 12, color: 'var(--dsw-alias-text-tertiary)', padding: '2px 6px' }} title="插件管家正在守护系统，不可在此关闭">
+											<span style={{ fontSize: 12, color: 'var(--dsw-alias-text-tertiary)', padding: '2px 6px' }} title="插件管家正在守护系统，不可在此关闭或卸载">
 												守护中
 											</span>
 										) : (
-											<button
-												className="pg-btn"
-												style={{ padding: '3px 8px', fontSize: 12 }}
-												onClick={() => handleToggleBundle(bundle, false)}
-												disabled={busy}
-												title="将该插件从激活列表中移除（手动关闭）"
-											>
-												<IconPower size={12} />
-												<span>手动关闭</span>
-											</button>
+											<>
+												<button
+													className="pg-btn"
+													style={{ padding: '3px 8px', fontSize: 12 }}
+													onClick={() => handleToggleBundle(bundle, false)}
+													disabled={busy || uninstalling}
+													title="将该插件从激活列表中移除（停用）"
+												>
+													<IconPower size={12} />
+													<span>关闭</span>
+												</button>
+												<button
+													className="pg-btn pg-btn-danger-outline"
+													style={{ padding: '3px 8px', fontSize: 12 }}
+													onClick={() => setUninstallTarget(bundle)}
+													disabled={busy || uninstalling}
+													title="从系统运行清单与本地依赖彻底卸载该插件"
+												>
+													<IconTrash size={12} />
+													<span>卸载</span>
+												</button>
+											</>
 										)}
 									</div>
 								</div>
@@ -659,17 +701,20 @@ function GuardianPanel() {
 						})}
 						{currentThird.length === 0 && (
 							<div style={{ padding: '12px 0', fontSize: 13, color: 'var(--dsw-alias-text-tertiary)' }}>
-								暂无已激活的第三方插件。
+								暂无已启用的第三方扩展插件。
 							</div>
 						)}
 					</div>
 				</div>
 
-				{/* 已安装但未激活的插件 (如果有) */}
+				{/* 已安装但未开启的插件 (如果有) */}
 				{inactiveInstalled.length > 0 && !isIncident && (
 					<div className="pg-card">
 						<div className="pg-card-title">
-							<span>已在 dependencies 安装、但未激活的第三方插件 ({inactiveInstalled.length})</span>
+							<span>已安装但未开启的插件 ({inactiveInstalled.length})</span>
+						</div>
+						<div style={{ fontSize: 12, color: 'var(--dsw-alias-text-tertiary)', marginBottom: 8 }}>
+							本地已就绪，未进入运行清单，点击可快速开启或彻底卸载：
 						</div>
 						<div className="pg-list">
 							{inactiveInstalled.map((pkg) => (
@@ -678,15 +723,27 @@ function GuardianPanel() {
 										<IconPower size={14} />
 										<span className="pg-row-name">{pkg}</span>
 									</div>
-									<button
-										className="pg-btn pg-btn-primary"
-										style={{ padding: '3px 10px', fontSize: 12 }}
-										onClick={() => handleToggleBundle(pkg, true)}
-										disabled={busy}
-										title="将该插件加入激活列表（手动激活）"
-									>
-										<span>手动激活</span>
-									</button>
+									<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+										<button
+											className="pg-btn pg-btn-primary"
+											style={{ padding: '3px 10px', fontSize: 12 }}
+											onClick={() => handleToggleBundle(pkg, true)}
+											disabled={busy || uninstalling}
+											title="将该插件加入激活列表（启用）"
+										>
+											<span>启用</span>
+										</button>
+										<button
+											className="pg-btn pg-btn-danger-outline"
+											style={{ padding: '3px 8px', fontSize: 12 }}
+											onClick={() => setUninstallTarget(pkg)}
+											disabled={busy || uninstalling}
+											title="从本地依赖彻底卸载该插件"
+										>
+											<IconTrash size={12} />
+											<span>卸载</span>
+										</button>
+									</div>
 								</div>
 							))}
 						</div>
@@ -993,7 +1050,60 @@ function GuardianPanel() {
 
 							{/* 安全提示说明 */}
 							<div className="pg-tip-box">
-								<strong>🛡️ 插件管家安全保护</strong>：在安装任何插件前，管家都会为您强制打一份 <strong>安装前健康快照（pre_install）</strong>。若安装过程中出错或新插件有 Bug 导致崩溃，你可以随时在管家面板或桌面脱机脚本一键秒级回退！
+								<strong>插件管家安全保护</strong>：在安装任何插件前，管家都会为您强制打一份 <strong>安装前健康快照（pre_install）</strong>。若安装过程中出错或新插件有缺陷导致崩溃，你可以随时在管家面板或桌面脱机脚本一键秒级回退！
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* 卸载二次确认弹窗 */}
+			{uninstallTarget && (
+				<div className="pg-modal-overlay" onClick={() => !uninstalling && setUninstallTarget(null)}>
+					<div className="pg-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+						<div className="pg-modal-header">
+							<div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+								<div style={{ color: 'var(--dsw-alias-intent-danger, #ef4444)' }}>
+									<IconTrash size={20} />
+								</div>
+								<div>
+									<h3 className="pg-modal-title">确认彻底卸载插件？</h3>
+									<span style={{ fontSize: 11, color: 'var(--dsw-alias-text-tertiary)' }}>
+										防灾保护已启用 · 卸载前自动创建健康快照
+									</span>
+								</div>
+							</div>
+							<button
+								className="pg-modal-close"
+								onClick={() => !uninstalling && setUninstallTarget(null)}
+								disabled={uninstalling}
+								title="取消"
+							>
+								<IconX size={16} />
+							</button>
+						</div>
+						<div className="pg-modal-body" style={{ padding: '16px 20px' }}>
+							<div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--dsw-alias-text-primary)' }}>
+								确定要从系统中彻底移除扩展插件 <strong style={{ color: 'var(--dsw-alias-intent-danger, #ef4444)' }}>{uninstallTarget}</strong> 吗？
+							</div>
+							<div style={{ marginTop: 12, fontSize: 12, color: 'var(--dsw-alias-text-secondary)', background: 'var(--dsw-alias-surface-raised)', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-subtle)', lineHeight: 1.5 }}>
+								系统将在卸载前自动生成一份 <code>pre_uninstall</code> 快照。若后续需要重新找回，可在「历史健康快照」中一键恢复。
+							</div>
+							<div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+								<button
+									className="pg-btn"
+									onClick={() => setUninstallTarget(null)}
+									disabled={uninstalling}
+								>
+									取消
+								</button>
+								<button
+									className="pg-btn pg-btn-danger"
+									onClick={() => handleUninstallPlugin(uninstallTarget)}
+									disabled={uninstalling}
+								>
+									{uninstalling ? '正在安全卸载...' : '确认卸载'}
+								</button>
 							</div>
 						</div>
 					</div>

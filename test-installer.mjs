@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 import { getEnrichedCatalog } from './src/catalog.js';
-import { normalizeSpec, resolvePnpmExecutor } from './src/installer-core.js';
+import { normalizeSpec, resolvePnpmExecutor, executePluginUninstall } from './src/installer-core.js';
 import {
 	createSnapshot,
 	listSnapshots,
@@ -101,8 +101,38 @@ try {
 	assert.ok(restoredManifest.dsh.profile.bundles.includes('dsh-plugin-whale-pet'));
 	assert.ok(restoredManifest.dsh.profile.bundles.includes(GUARDIAN_BUNDLE_NAME));
 	console.log('  ✔ 安装前安全快照与一键回滚验证通过！');
+
+	// 5. 测试插件安全彻底卸载 (executePluginUninstall)
+	console.log('\nStep 5: 测试插件彻底卸载流水线 (executePluginUninstall)...');
+	// 5.1 安全防护：禁止卸载核心组件或管家自身
+	await assert.rejects(
+		async () => executePluginUninstall(tmpProfile, GUARDIAN_BUNDLE_NAME),
+		/安全保护/,
+		'应当拦截对管家自身的卸载'
+	);
+	await assert.rejects(
+		async () => executePluginUninstall(tmpProfile, '@deepseek-ai/dsh-base'),
+		/安全保护/,
+		'应当拦截对核心底座的卸载'
+	);
+
+	// 5.2 正常卸载测试：卸载 dsh-plugin-whale-pet
+	const uninstallResult = await executePluginUninstall(tmpProfile, 'dsh-plugin-whale-pet');
+	assert.equal(uninstallResult.ok, true, '卸载执行应当成功');
+	assert.equal(uninstallResult.uninstalledPackage, 'dsh-plugin-whale-pet');
+
+	const afterUninstallManifest = JSON.parse(fs.readFileSync(path.join(tmpProfile, 'package.json'), 'utf8'));
+	assert.ok(!afterUninstallManifest.dsh.profile.bundles.includes('dsh-plugin-whale-pet'), 'bundles 中应彻底移除');
+	assert.equal(afterUninstallManifest.dependencies?.['dsh-plugin-whale-pet'], undefined, 'dependencies 中应彻底删除');
+
+	const { snapshots: snapsAfterUninstall } = listSnapshots(tmpProfile);
+	const preUninstSnap = snapsAfterUninstall.find((s) => s.reason === 'pre_uninstall');
+	assert.ok(preUninstSnap, '快照列表中必须包含 pre_uninstall 快照');
+	const afterUninstSnap = snapsAfterUninstall.find((s) => s.reason === 'after_uninstall');
+	assert.ok(afterUninstSnap, '快照列表中必须包含 after_uninstall 快照');
+	console.log('  ✔ 插件卸载前强制快照、配置剔除与卸载后记录全链路验证通过！');
 } finally {
 	fs.rmSync(tmpProfile, { recursive: true, force: true });
 }
 
-console.log('\n🎉 安装器核心逻辑与安全链 100% 验证通过！');
+console.log('\n🎉 安装与卸载核心逻辑与安全链 100% 验证通过！');

@@ -1,7 +1,7 @@
 {
 	"inputs": {
 		"src/guardian.css": {
-			"bytes": 11996,
+			"bytes": 12191,
 			"imports": []
 		},
 		"src/client.jsx": {
@@ -37,10 +37,10 @@
 					"bytesInOutput": 37250
 				},
 				"src/guardian.css": {
-					"bytesInOutput": 12220
+					"bytesInOutput": 12415
 				}
 			},
-			"bytes": 50210
+			"bytes": 50405
 		}
 	}
 }

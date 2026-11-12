@@ -176,6 +176,40 @@ function formatReason(reason, fallbackText) {
 
 /* ---------- 详情页返回插件管家联动拦截器 ---------- */
 
+function returnToGuardian() {
+	if (typeof window !== 'undefined') {
+		window.__dsh_guardian_return_target__ = false;
+	}
+
+	// 方式 1: 优先模拟点击侧栏按钮（100% 触发 DSH 宿主内部的面板切换与高亮激活）
+	if (typeof document !== 'undefined') {
+		const btns = Array.from(document.querySelectorAll('button'));
+		const sidebarBtn = btns.find((b) => {
+			const label = b.getAttribute ? (b.getAttribute('aria-label') || b.getAttribute('title') || '') : '';
+			const text = b.innerText || '';
+			return label.includes('插件管家') || text.includes('插件管家');
+		});
+		if (sidebarBtn) {
+			sidebarBtn.click();
+			return;
+		}
+	}
+
+	// 方式 2: 通过 Cordis 注入的 layout 服务
+	const ctx = typeof globalThis !== 'undefined' ? globalThis.__dsh_guardian_ctx__ : null;
+	if (ctx?.layout && typeof ctx.layout.selectPanel === 'function') {
+		ctx.layout.selectPanel('plugin-guardian');
+		return;
+	}
+	if (ctx?.get && typeof ctx.get === 'function') {
+		const layout = ctx.get('layout');
+		if (layout && typeof layout.selectPanel === 'function') {
+			layout.selectPanel('plugin-guardian');
+			return;
+		}
+	}
+}
+
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function' && !window.__dsh_guardian_back_listener_installed__) {
 	window.__dsh_guardian_back_listener_installed__ = true;
 
@@ -211,12 +245,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 				e.preventDefault();
 				e.stopPropagation();
 				e.stopImmediatePropagation();
-				window.__dsh_guardian_return_target__ = false;
-
-				const ctx = globalThis.__dsh_guardian_ctx__;
-				if (ctx?.layout?.selectPanel) {
-					ctx.layout.selectPanel('plugin-guardian');
-				}
+				returnToGuardian();
 			}
 		},
 		true // 捕获阶段优先拦截
@@ -228,7 +257,7 @@ function enhanceBackButton() {
 	if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
 	const btns = document.querySelectorAll('button');
 	for (const b of btns) {
-		const ariaLabel = b.getAttribute('aria-label') || '';
+		const ariaLabel = b.getAttribute ? (b.getAttribute('aria-label') || '') : '';
 		const className = String(b.className || '');
 		if (className.includes('crumb') || ariaLabel.includes('返回') || ariaLabel.includes('Back')) {
 			const span = b.querySelector('span');
@@ -237,6 +266,12 @@ function enhanceBackButton() {
 				span.textContent = '返回插件管家';
 				b.setAttribute('title', '返回插件管家');
 			}
+			// 直接为返回按钮绑定就地处理函数
+			b.onclick = (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				returnToGuardian();
+			};
 		}
 	}
 }
@@ -1288,7 +1323,7 @@ function PanelIcon({ size = 20, active = false }) {
 	);
 }
 
-export const inject = ['slots'];
+export const inject = ['slots', 'layout'];
 
 export function apply(ctx) {
 	globalThis.__dsh_guardian_ctx__ = ctx;

@@ -131,8 +131,25 @@ try {
 	const afterUninstSnap = snapsAfterUninstall.find((s) => s.reason === 'after_uninstall');
 	assert.ok(afterUninstSnap, '快照列表中必须包含 after_uninstall 快照');
 	console.log('  ✔ 插件卸载前强制快照、配置剔除与卸载后记录全链路验证通过！');
+
+	// 6. 测试版本比对与元数据扫描逻辑 (version-service)
+	console.log('\nStep 6: 测试插件版本元数据与更新检测逻辑 (version-service)...');
+	const { isNewerVersion, getInstalledPackagesMeta } = await import('./src/version-service.js');
+	assert.equal(isNewerVersion('0.4.7', '0.4.8'), true);
+	assert.equal(isNewerVersion('0.4.8', '0.4.8'), false);
+	assert.equal(isNewerVersion('1.0.0', '0.9.9'), false);
+	assert.equal(isNewerVersion('0.2.1-rc.1', '0.2.2'), true);
+
+	// 模拟写入 mock 插件 package.json
+	const mockPkgDir = path.join(tmpProfile, 'node_modules', 'mock-pkg');
+	fs.mkdirSync(mockPkgDir, { recursive: true });
+	fs.writeFileSync(path.join(mockPkgDir, 'package.json'), JSON.stringify({ version: '1.2.3', description: 'Mock Plugin' }));
+	const scannedMeta = getInstalledPackagesMeta(tmpProfile, ['mock-pkg', 'missing-pkg']);
+	assert.equal(scannedMeta['mock-pkg'].version, '1.2.3');
+	assert.equal(scannedMeta['missing-pkg'].version, null);
+	console.log('  ✔ 版本语义比对与本地 node_modules 扫描验证通过！');
 } finally {
 	fs.rmSync(tmpProfile, { recursive: true, force: true });
 }
 
-console.log('\n🎉 安装与卸载核心逻辑与安全链 100% 验证通过！');
+console.log('\n🎉 安装、卸载、版本与安全防护全链路 100% 验证通过！');

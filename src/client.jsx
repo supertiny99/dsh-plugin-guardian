@@ -197,9 +197,36 @@ function GuardianPanel() {
 	const [uninstallTarget, setUninstallTarget] = useState(null);
 	const [uninstalling, setUninstalling] = useState(false);
 
+	// 版本更新检测状态：{ [pkg]: { currentVersion, latestVersion, hasUpdate } }
+	const [updates, setUpdates] = useState({});
+	const [checkingUpdates, setCheckingUpdates] = useState(false);
+
 	const showToast = (msg) => {
 		setToastMsg(msg);
 		setTimeout(() => setToastMsg(null), 3500);
+	};
+
+	const fetchUpdates = useCallback(async () => {
+		try {
+			setCheckingUpdates(true);
+			const res = await fetch('/plugin-guardian/check-updates');
+			if (res.ok) {
+				const data = await res.json();
+				if (data.updates) setUpdates(data.updates);
+			}
+		} catch {} finally {
+			setCheckingUpdates(false);
+		}
+	}, []);
+
+	const handleOpenOfficialDetail = (pkgName) => {
+		const ctx = globalThis.__dsh_guardian_ctx__;
+		const nav = ctx?.get?.('pluginNavigation');
+		if (nav && typeof nav.openBundle === 'function') {
+			nav.openBundle(pkgName);
+		} else {
+			showToast(`已请求查看 ${pkgName} 详情，若未自动跳转请点击侧边栏“插件”`);
+		}
 	};
 
 	const fetchStatus = useCallback(async () => {
@@ -212,13 +239,16 @@ function GuardianPanel() {
 				if (data.disabledFromHealthy && data.disabledFromHealthy.length > 0) {
 					setSelectedBundles(new Set(data.disabledFromHealthy));
 				}
+				if (data.allInstalledThirdParty && data.allInstalledThirdParty.length > 0) {
+					fetchUpdates();
+				}
 			}
 		} catch (err) {
 			console.error('Failed to fetch guardian status:', err);
 		} finally {
 			setLoading(false);
 		}
-	}, []);
+	}, [fetchUpdates]);
 
 	const fetchCatalog = useCallback(async () => {
 		try {
@@ -657,11 +687,35 @@ function GuardianPanel() {
 					<div className="pg-list" style={{ marginTop: 8 }}>
 						{currentThird.map((bundle) => {
 							const isSelf = bundle === '@supertiny99/dsh-plugin-guardian' || bundle === 'dsh-plugin-guardian';
+							const ver = status?.installedMeta?.[bundle]?.version;
+							const upInfo = updates[bundle];
 							return (
 								<div key={bundle} className="pg-row">
-									<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+									<div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
 										<IconPackage size={15} />
-										<span className="pg-row-name">{bundle}</span>
+										<button
+											className="pg-plugin-link"
+											onClick={() => handleOpenOfficialDetail(bundle)}
+											title="点击在官方插件管理器中查看完整 README 与详细配置"
+										>
+											{bundle}
+										</button>
+										{ver && (
+											<span className="pg-version-tag">
+												v{ver}
+											</span>
+										)}
+										{upInfo?.hasUpdate && (
+											<button
+												className="pg-update-tag"
+												onClick={() => handleInstallPlugin(bundle)}
+												title="检测到新版本，点击一键平滑升级"
+												disabled={installing}
+											>
+												<IconUpload size={11} />
+												<span>可更新至 v{upInfo.latestVersion}</span>
+											</button>
+										)}
 									</div>
 									<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 										<span className="pg-plugin-tag" style={{ background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
@@ -714,38 +768,64 @@ function GuardianPanel() {
 							<span>已安装但未开启的插件 ({inactiveInstalled.length})</span>
 						</div>
 						<div style={{ fontSize: 12, color: 'var(--dsw-alias-text-tertiary)', marginBottom: 8 }}>
-							本地已就绪，未进入运行清单，点击可快速开启或彻底卸载：
+							本地已就绪，未进入运行清单，点击名称可查看官方详情，支持快速开启或彻底卸载：
 						</div>
 						<div className="pg-list">
-							{inactiveInstalled.map((pkg) => (
-								<div key={pkg} className="pg-row">
-									<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-										<IconPower size={14} />
-										<span className="pg-row-name">{pkg}</span>
+							{inactiveInstalled.map((pkg) => {
+								const ver = status?.installedMeta?.[pkg]?.version;
+								const upInfo = updates[pkg];
+								return (
+									<div key={pkg} className="pg-row">
+										<div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+											<IconPower size={14} />
+											<button
+												className="pg-plugin-link"
+												onClick={() => handleOpenOfficialDetail(pkg)}
+												title="点击在官方插件管理器中查看完整详情"
+											>
+												{pkg}
+											</button>
+											{ver && (
+												<span className="pg-version-tag">
+													v{ver}
+												</span>
+											)}
+											{upInfo?.hasUpdate && (
+												<button
+													className="pg-update-tag"
+													onClick={() => handleInstallPlugin(pkg)}
+													title="检测到新版本，点击一键更新"
+													disabled={installing}
+												>
+													<IconUpload size={11} />
+													<span>可更新至 v{upInfo.latestVersion}</span>
+												</button>
+											)}
+										</div>
+										<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+											<button
+												className="pg-btn pg-btn-primary"
+												style={{ padding: '3px 10px', fontSize: 12 }}
+												onClick={() => handleToggleBundle(pkg, true)}
+												disabled={busy || uninstalling}
+												title="将该插件加入激活列表（启用）"
+											>
+												<span>启用</span>
+											</button>
+											<button
+												className="pg-btn pg-btn-danger-outline"
+												style={{ padding: '3px 8px', fontSize: 12 }}
+												onClick={() => setUninstallTarget(pkg)}
+												disabled={busy || uninstalling}
+												title="从本地依赖彻底卸载该插件"
+											>
+												<IconTrash size={12} />
+												<span>卸载</span>
+											</button>
+										</div>
 									</div>
-									<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-										<button
-											className="pg-btn pg-btn-primary"
-											style={{ padding: '3px 10px', fontSize: 12 }}
-											onClick={() => handleToggleBundle(pkg, true)}
-											disabled={busy || uninstalling}
-											title="将该插件加入激活列表（启用）"
-										>
-											<span>启用</span>
-										</button>
-										<button
-											className="pg-btn pg-btn-danger-outline"
-											style={{ padding: '3px 8px', fontSize: 12 }}
-											onClick={() => setUninstallTarget(pkg)}
-											disabled={busy || uninstalling}
-											title="从本地依赖彻底卸载该插件"
-										>
-											<IconTrash size={12} />
-											<span>卸载</span>
-										</button>
-									</div>
-								</div>
-							))}
+								);
+							})}
 						</div>
 					</div>
 				)}
@@ -1139,6 +1219,7 @@ function PanelIcon({ size = 20, active = false }) {
 export const inject = ['slots'];
 
 export function apply(ctx) {
+	globalThis.__dsh_guardian_ctx__ = ctx;
 	ctx.slots.inject('sidebar.panellist', () =>
 		ctx.slots.register(
 			{ name: 'sidebar.panellist', id: 'plugin-guardian', order: 70, label: '插件管家' },

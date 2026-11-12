@@ -22,6 +22,7 @@ import {
 } from './guardian-core.js';
 import { getEnrichedCatalog } from './catalog.js';
 import { chooseLocalTgzFile, executePluginInstall, executePluginUninstall } from './installer-core.js';
+import { checkPackagesUpdates } from './version-service.js';
 import path from 'node:path';
 import os from 'node:os';
 import { exec } from 'node:child_process';
@@ -198,6 +199,13 @@ export function apply(ctx, config) {
 							} catch (e) {
 								return json(500, { ok: false, error: e.message });
 							}
+						}
+
+						// 11. 检查插件最新版本与更新
+						if (pathname === '/check-updates' && req.method === 'GET') {
+							const status = getGuardianStatus(profileDir);
+							const result = await checkPackagesUpdates(profileDir, status.allInstalledThirdParty || []);
+							return json(200, { ok: true, ...result });
 						}
 
 						return json(404, { ok: false, error: 'Not Found' });

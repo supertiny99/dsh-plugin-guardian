@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { getInstalledPackagesMeta } from './version-service.js';
 
 export const GUARDIAN_BUNDLE_NAME = '@supertiny99/dsh-plugin-guardian';
 export const LEGACY_GUARDIAN_NAME = 'dsh-plugin-guardian';
@@ -344,12 +345,16 @@ export function getGuardianStatus(profileDir) {
 	const currentPatchTrimmed = (currentPatch || '').trim();
 	const patchNeedsRecovery = (currentPatchTrimmed === '' || currentPatchTrimmed === '[]') && bakFiles.length > 0;
 
+	// 读取所有已安装第三方插件的 package.json 获取版本号
+	const installedMeta = getInstalledPackagesMeta(profileDir, allInstalledThirdParty);
+
 	return {
 		profileDir,
 		currentBundles,
 		currentThirdParty,
 		allInstalledThirdParty,
 		inactiveInstalled,
+		installedMeta,
 		isIncident,
 		disabledFromHealthy,
 		latestHealthy: latestHealthy

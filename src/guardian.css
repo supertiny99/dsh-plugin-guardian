@@ -278,3 +278,207 @@
 	z-index: 9999;
 	transition: opacity 0.2s ease;
 }
+
+/* ---------- 插件安装器弹窗与精选市场样式 ---------- */
+
+.pg-modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.5);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+	padding: 24px;
+	backdrop-filter: blur(2px);
+}
+
+.pg-modal {
+	width: 100%;
+	max-width: 680px;
+	max-height: 85vh;
+	background: var(--dsw-alias-surface-overlay, #ffffff);
+	border: 1px solid var(--dsw-alias-border-subtle, rgba(0, 0, 0, 0.15));
+	border-radius: 12px;
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 16px 36px rgba(0, 0, 0, 0.25);
+	overflow: hidden;
+}
+
+.pg-modal-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 18px 24px;
+	border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(0, 0, 0, 0.08));
+	background: var(--dsw-alias-surface-raised, rgba(0, 0, 0, 0.02));
+}
+
+.pg-modal-title {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--dsw-alias-text-primary, #0f172a);
+}
+
+.pg-modal-close {
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	color: var(--dsw-alias-text-tertiary, #94a3b8);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 6px;
+	border-radius: 6px;
+}
+
+.pg-modal-close:hover {
+	background: var(--dsw-alias-control-bg-neutral-hover, rgba(0, 0, 0, 0.06));
+	color: var(--dsw-alias-text-primary, #0f172a);
+}
+
+.pg-tabs {
+	display: flex;
+	gap: 6px;
+	padding: 10px 24px 0 24px;
+	border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(0, 0, 0, 0.08));
+	background: var(--dsw-alias-surface-raised, rgba(0, 0, 0, 0.01));
+}
+
+.pg-tab-btn {
+	padding: 8px 16px;
+	font-size: 13px;
+	font-weight: 500;
+	background: transparent;
+	border: none;
+	border-bottom: 2px solid transparent;
+	color: var(--dsw-alias-text-secondary, #64748b);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	transition: all 0.15s ease;
+}
+
+.pg-tab-btn:hover {
+	color: var(--dsw-alias-text-primary, #0f172a);
+}
+
+.pg-tab-btn.active {
+	color: var(--dsw-alias-accent-primary, #2563eb);
+	border-bottom-color: var(--dsw-alias-accent-primary, #2563eb);
+}
+
+.pg-modal-body {
+	padding: 20px 24px;
+	overflow-y: auto;
+	flex: 1;
+}
+
+/* 市场卡片网格 */
+.pg-catalog-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.pg-catalog-card {
+	border: 1px solid var(--dsw-alias-border-subtle, rgba(0, 0, 0, 0.08));
+	border-radius: 8px;
+	padding: 14px 16px;
+	background: var(--dsw-alias-surface-overlay, #ffffff);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	transition: border-color 0.15s ease;
+}
+
+.pg-catalog-card:hover {
+	border-color: var(--dsw-alias-border-strong, rgba(0, 0, 0, 0.2));
+}
+
+.pg-catalog-info {
+	flex: 1;
+}
+
+.pg-catalog-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+.pg-catalog-title {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--dsw-alias-text-primary, #0f172a);
+}
+
+.pg-catalog-badge {
+	font-size: 11px;
+	padding: 1px 6px;
+	border-radius: 4px;
+	background: var(--dsw-alias-accent-subtle, rgba(59, 130, 246, 0.1));
+	color: var(--dsw-alias-accent-primary, #2563eb);
+	font-weight: 500;
+}
+
+.pg-catalog-desc {
+	font-size: 12px;
+	color: var(--dsw-alias-text-secondary, #475569);
+	line-height: 1.4;
+	margin-bottom: 4px;
+}
+
+.pg-catalog-meta {
+	font-size: 11px;
+	color: var(--dsw-alias-text-tertiary, #94a3b8);
+	font-family: monospace;
+}
+
+/* 本地文件选取区域 */
+.pg-file-dropzone {
+	border: 2px dashed var(--dsw-alias-border-strong, rgba(0, 0, 0, 0.2));
+	border-radius: 10px;
+	padding: 32px 20px;
+	text-align: center;
+	background: var(--dsw-alias-surface-raised, rgba(0, 0, 0, 0.02));
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+}
+
+.pg-input {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 9px 12px;
+	border-radius: 6px;
+	border: 1px solid var(--dsw-alias-border-subtle, rgba(0, 0, 0, 0.15));
+	background: var(--dsw-alias-control-bg-neutral, #ffffff);
+	color: var(--dsw-alias-text-primary, #0f172a);
+	font-size: 13px;
+	outline: none;
+}
+
+.pg-input:focus {
+	border-color: var(--dsw-alias-accent-primary, #2563eb);
+}
+
+.pg-tip-box {
+	margin-top: 14px;
+	padding: 10px 14px;
+	border-radius: 6px;
+	background: var(--dsw-alias-accent-subtle, rgba(59, 130, 246, 0.08));
+	border: 1px solid var(--dsw-alias-accent-subtle, rgba(59, 130, 246, 0.2));
+	font-size: 12px;
+	color: var(--dsw-alias-text-secondary, #334155);
+	line-height: 1.5;
+}
+

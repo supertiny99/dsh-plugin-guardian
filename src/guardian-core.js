@@ -25,6 +25,7 @@ export const REASON_TEXT_MAP = {
 	manual_activate: '手动激活插件',
 	manual_deactivate: '手动关闭插件',
 	pre_install: '安装前快照',
+	after_install: '安装插件后记录',
 	clean_retained: '清理后保留快照',
 };
 

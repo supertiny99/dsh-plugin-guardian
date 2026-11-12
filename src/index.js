@@ -10,6 +10,7 @@
 import {
 	resolveProfileDir,
 	getGuardianStatus,
+	readProfileManifest,
 	createSnapshot,
 	listSnapshots,
 	deleteSnapshot,
@@ -19,6 +20,8 @@ import {
 	restorePatch,
 	generateOfflineScript,
 } from './guardian-core.js';
+import { getEnrichedCatalog } from './catalog.js';
+import { chooseLocalTgzFile, executePluginInstall } from './installer-core.js';
 import path from 'node:path';
 import os from 'node:os';
 import { exec } from 'node:child_process';
@@ -154,6 +157,33 @@ export function apply(ctx, config) {
 								}
 							} catch {}
 							return json(200, { ok: true, target: result.scriptPath, fileName: result.fileName });
+						}
+
+						// 7. 获取精选插件目录及安装状态
+						if (pathname === '/catalog' && req.method === 'GET') {
+							const manifest = readProfileManifest(profileDir);
+							const catalog = getEnrichedCatalog(manifest);
+							return json(200, { ok: true, catalog });
+						}
+
+						// 8. 唤起系统文件选择框选取本地 .tgz
+						if (pathname === '/choose-file' && req.method === 'POST') {
+							const result = await chooseLocalTgzFile();
+							return json(result.ok ? 200 : 400, result);
+						}
+
+						// 9. 执行插件安装（安装前强制健康快照）
+						if (pathname === '/install' && req.method === 'POST') {
+							const body = await parseBody(req);
+							if (!body.spec) {
+								return json(400, { ok: false, error: 'spec is required' });
+							}
+							try {
+								const result = await executePluginInstall(profileDir, body.spec);
+								return json(200, result);
+							} catch (e) {
+								return json(500, { ok: false, error: e.message });
+							}
 						}
 
 						return json(404, { ok: false, error: 'Not Found' });

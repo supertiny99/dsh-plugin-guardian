@@ -118,6 +118,41 @@ const IconPower = ({ size = 14 }) => (
 	</SvgIcon>
 );
 
+const IconPlus = ({ size = 14 }) => (
+	<SvgIcon size={size}>
+		<line x1="12" y1="5" x2="12" y2="19" />
+		<line x1="5" y1="12" x2="19" y2="12" />
+	</SvgIcon>
+);
+
+const IconX = ({ size = 14 }) => (
+	<SvgIcon size={size}>
+		<line x1="18" y1="6" x2="6" y2="18" />
+		<line x1="6" y1="6" x2="18" y2="18" />
+	</SvgIcon>
+);
+
+const IconFolder = ({ size = 16 }) => (
+	<SvgIcon size={size}>
+		<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+	</SvgIcon>
+);
+
+const IconCompass = ({ size = 14 }) => (
+	<SvgIcon size={size}>
+		<circle cx="12" cy="12" r="10" />
+		<polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+	</SvgIcon>
+);
+
+const IconUpload = ({ size = 14 }) => (
+	<SvgIcon size={size}>
+		<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+		<polyline points="17 8 12 3 7 8" />
+		<line x1="12" y1="3" x2="12" y2="15" />
+	</SvgIcon>
+);
+
 /* ---------- 操作类型与原因转义字典 ---------- */
 
 const REASON_LABELS = {
@@ -127,6 +162,7 @@ const REASON_LABELS = {
 	manual_activate: '手动激活插件',
 	manual_deactivate: '手动关闭插件',
 	pre_install: '安装前快照',
+	after_install: '安装插件后记录',
 	clean_retained: '清理后保留快照',
 };
 
@@ -145,6 +181,15 @@ function GuardianPanel() {
 	const [restorePatchFlag, setRestorePatchFlag] = useState(true);
 	const [toastMsg, setToastMsg] = useState(null);
 	const [busy, setBusy] = useState(false);
+
+	// 安装器模态框状态
+	const [showInstallModal, setShowInstallModal] = useState(false);
+	const [installTab, setInstallTab] = useState('catalog'); // 'catalog' | 'local' | 'custom'
+	const [catalogList, setCatalogList] = useState([]);
+	const [catalogLoading, setCatalogLoading] = useState(false);
+	const [localFile, setLocalFile] = useState(null);
+	const [customSpec, setCustomSpec] = useState('');
+	const [installing, setInstalling] = useState(false);
 
 	const showToast = (msg) => {
 		setToastMsg(msg);
@@ -169,9 +214,71 @@ function GuardianPanel() {
 		}
 	}, []);
 
+	const fetchCatalog = useCallback(async () => {
+		try {
+			setCatalogLoading(true);
+			const res = await fetch('/plugin-guardian/catalog');
+			if (res.ok) {
+				const data = await res.json();
+				setCatalogList(data.catalog || []);
+			}
+		} catch (err) {
+			console.error('Failed to fetch catalog:', err);
+		} finally {
+			setCatalogLoading(false);
+		}
+	}, []);
+
 	useEffect(() => {
 		fetchStatus();
 	}, [fetchStatus]);
+
+	const handleChooseLocalFile = async () => {
+		try {
+			setBusy(true);
+			const res = await fetch('/plugin-guardian/choose-file', { method: 'POST' });
+			const data = await res.json();
+			if (data.ok) {
+				setLocalFile(data);
+			} else if (data.error && !data.error.includes('取消')) {
+				showToast('选择文件失败: ' + data.error);
+			}
+		} catch (err) {
+			showToast('唤起文件选择器失败: ' + err.message);
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const handleInstallPlugin = async (specToInstall) => {
+		if (!specToInstall || !specToInstall.trim()) {
+			showToast('请输入或选择插件 Spec');
+			return;
+		}
+		try {
+			setInstalling(true);
+			const res = await fetch('/plugin-guardian/install', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ spec: specToInstall.trim() }),
+			});
+			const result = await res.json();
+			if (result.ok) {
+				showToast(`插件 ${result.installedPackage || specToInstall} 安装成功！请完全退出并重启 DSH 生效`);
+				setShowInstallModal(false);
+				setLocalFile(null);
+				setCustomSpec('');
+				await fetchStatus();
+				await fetchCatalog();
+			} else {
+				showToast('安装失败: ' + (result.error || '未知错误'));
+			}
+		} catch (err) {
+			showToast('请求安装失败: ' + err.message);
+		} finally {
+			setInstalling(false);
+		}
+	};
 
 	const toggleBundle = (b) => {
 		const next = new Set(selectedBundles);
@@ -378,6 +485,18 @@ function GuardianPanel() {
 					</div>
 				</div>
 				<div className="pg-actions">
+					<button
+						className="pg-btn pg-btn-primary"
+						onClick={() => {
+							setShowInstallModal(true);
+							fetchCatalog();
+						}}
+						disabled={busy}
+						title="从精选市场、本地离线包或自定义安装新插件"
+					>
+						<IconPlus size={14} />
+						<span>安装新插件</span>
+					</button>
 					<button
 						className="pg-btn"
 						onClick={handleCreateSnapshot}
@@ -678,6 +797,193 @@ function GuardianPanel() {
 					</div>
 				</div>
 			</div>
+
+			{/* 安装新插件弹窗 */}
+			{showInstallModal && (
+				<div className="pg-modal-overlay" onClick={() => !installing && setShowInstallModal(false)}>
+					<div className="pg-modal" onClick={(e) => e.stopPropagation()}>
+						<div className="pg-modal-header">
+							<div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+								<IconPlus size={18} />
+								<div>
+									<h3 className="pg-modal-title">安装新插件</h3>
+									<span style={{ fontSize: 11, color: 'var(--dsw-alias-text-tertiary)' }}>
+										精选市场 · 本地离线安装 (.tgz) · 自定义 Spec（安装前自动健康快照）
+									</span>
+								</div>
+							</div>
+							<button
+								className="pg-modal-close"
+								onClick={() => !installing && setShowInstallModal(false)}
+								disabled={installing}
+								title="关闭"
+							>
+								<IconX size={16} />
+							</button>
+						</div>
+
+						{/* 选项卡导航 */}
+						<div className="pg-tabs">
+							<button
+								className={`pg-tab-btn ${installTab === 'catalog' ? 'active' : ''}`}
+								onClick={() => setInstallTab('catalog')}
+							>
+								<IconCompass size={14} />
+								<span>精选市场 ({catalogList.length || '推荐'})</span>
+							</button>
+							<button
+								className={`pg-tab-btn ${installTab === 'local' ? 'active' : ''}`}
+								onClick={() => setInstallTab('local')}
+							>
+								<IconFolder size={14} />
+								<span>本地安装包 (.tgz)</span>
+							</button>
+							<button
+								className={`pg-tab-btn ${installTab === 'custom' ? 'active' : ''}`}
+								onClick={() => setInstallTab('custom')}
+							>
+								<IconUpload size={14} />
+								<span>自定义 Spec</span>
+							</button>
+						</div>
+
+						<div className="pg-modal-body">
+							{/* Tab 1: 精选推荐 */}
+							{installTab === 'catalog' && (
+								<div>
+									<div style={{ fontSize: 12, color: 'var(--dsw-alias-text-secondary)', marginBottom: 12 }}>
+										官方与社区经过严格实测的稳定插件，点击即可一键下载并加入激活清单：
+									</div>
+									{catalogLoading ? (
+										<div style={{ textAlign: 'center', padding: 24, color: 'var(--dsw-alias-text-tertiary)' }}>
+											正在加载精选插件目录...
+										</div>
+									) : (
+										<div className="pg-catalog-grid">
+											{catalogList.map((item) => (
+												<div key={item.id} className="pg-catalog-card">
+													<div className="pg-catalog-info">
+														<div className="pg-catalog-header">
+															<span className="pg-catalog-title">{item.title}</span>
+															<span className="pg-catalog-badge">{item.badge || item.category}</span>
+															{item.isInstalled && (
+																<span
+																	className="pg-plugin-tag"
+																	style={{
+																		background: item.isActive ? 'rgba(22, 163, 74, 0.1)' : 'rgba(234, 179, 8, 0.1)',
+																		color: item.isActive ? '#16a34a' : '#ca8a04',
+																		fontSize: 11,
+																		padding: '1px 6px',
+																	}}
+																>
+																	{item.isActive ? '运行中' : '已安装未激活'}
+																</span>
+															)}
+														</div>
+														<div className="pg-catalog-desc">{item.description}</div>
+														<div className="pg-catalog-meta">包名: {item.name}</div>
+													</div>
+													<div>
+														{item.isInstalled ? (
+															<button
+																className="pg-btn"
+																style={{ padding: '4px 10px', fontSize: 12 }}
+																disabled
+															>
+																已安装
+															</button>
+														) : (
+															<button
+																className="pg-btn pg-btn-primary"
+																style={{ padding: '5px 12px', fontSize: 12 }}
+																onClick={() => handleInstallPlugin(item.spec)}
+																disabled={installing}
+															>
+																{installing ? '安装中...' : '一键安装'}
+															</button>
+														)}
+													</div>
+												</div>
+											))}
+										</div>
+									)}
+								</div>
+							)}
+
+							{/* Tab 2: 本地离线安装 (.tgz) */}
+							{installTab === 'local' && (
+								<div>
+									<div className="pg-file-dropzone">
+										<IconFolder size={36} />
+										<div style={{ fontWeight: 500, fontSize: 14 }}>选取本地 DSH 插件离线包 (.tgz)</div>
+										<div style={{ fontSize: 12, color: 'var(--dsw-alias-text-tertiary)', maxWidth: 400 }}>
+											无需手写繁琐复杂的 file 绝对路径，点击直接唤起系统原生文件选择器
+										</div>
+										<button
+											className="pg-btn pg-btn-primary"
+											style={{ marginTop: 8 }}
+											onClick={handleChooseLocalFile}
+											disabled={busy || installing}
+										>
+											<IconFolder size={14} />
+											<span>浏览并选择本地 .tgz 文件</span>
+										</button>
+									</div>
+
+									{localFile && (
+										<div style={{ marginTop: 16, padding: 14, borderRadius: 8, border: '1px solid var(--dsw-alias-border-subtle)', background: 'var(--dsw-alias-surface-raised)' }}>
+											<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+												已选择: {localFile.fileName}
+											</div>
+											<div style={{ fontSize: 11, color: 'var(--dsw-alias-text-tertiary)', wordBreak: 'break-all', marginBottom: 12 }}>
+												路径: {localFile.filePath}
+											</div>
+											<button
+												className="pg-btn pg-btn-primary"
+												onClick={() => handleInstallPlugin(localFile.spec)}
+												disabled={installing}
+											>
+												{installing ? '正在安装...' : '立即安装此离线包'}
+											</button>
+										</div>
+									)}
+								</div>
+							)}
+
+							{/* Tab 3: 自定义 Spec */}
+							{installTab === 'custom' && (
+								<div>
+									<div style={{ fontSize: 12, color: 'var(--dsw-alias-text-secondary)', marginBottom: 8 }}>
+										输入任意 npm 包名、GitHub 仓库规范或本地路径：
+									</div>
+									<input
+										className="pg-input"
+										type="text"
+										value={customSpec}
+										onChange={(e) => setCustomSpec(e.target.value)}
+										placeholder="例如: @supertiny99/dsh-usage-dashboard 或 github:org/repo#v1.0"
+										disabled={installing}
+									/>
+									<div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+										<button
+											className="pg-btn pg-btn-primary"
+											onClick={() => handleInstallPlugin(customSpec)}
+											disabled={installing || !customSpec.trim()}
+										>
+											{installing ? '正在安全安装...' : '开始安装'}
+										</button>
+									</div>
+								</div>
+							)}
+
+							{/* 安全提示说明 */}
+							<div className="pg-tip-box">
+								<strong>🛡️ 插件管家安全保护</strong>：在安装任何插件前，管家都会为您强制打一份 <strong>安装前健康快照（pre_install）</strong>。若安装过程中出错或新插件有 Bug 导致崩溃，你可以随时在管家面板或桌面脱机脚本一键秒级回退！
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
 
 			{/* Toast 提示浮层 */}
 			{toastMsg && <div className="pg-toast">{toastMsg}</div>}

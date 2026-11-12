@@ -1,6 +1,6 @@
 {
 	"name": "@supertiny99/dsh-plugin-guardian",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "DeepSeek Harness (DSH) 插件管家与防灾恢复：解决异常插件崩溃后全盘禁用的痛点，提供自动快照、一键勾选恢复、配置挽回与跨平台桌面脱机应急恢复脚本。",
 	"type": "module",
 	"main": "src/index.js",

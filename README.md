@@ -32,6 +32,19 @@ DeepSeek Harness（桌面版）插件管家与防灾恢复工作台：解决第�
      - **Windows**：`restore-plugins.bat`（原生批处理）
      - **macOS**：`restore-plugins.command`（原生终端脚本）
    - DSH 彻底打不开时，直接在桌面双击该脚本，1 秒钟在后台脱机复原。
+6. **精选插件市场与一键安装**：
+   - 内置经过验证的社区与官方高质量插件目录，点击一键安装；
+   - 触发安装前**强制自动打安全健康快照**（`pre_install`），安装失败或引起崩溃可秒级回滚。
+7. **本地 `.tgz` 原生文件选择器与自定义 Spec 安装**：
+   - 支持通过系统文件弹窗浏览选择本地 `.tgz` 离线包，告别手写绝对路径易错问题；
+   - 支持自定义 npm / GitHub / 本地 spec 安装并提供格式校验。
+8. **插件安全彻底卸载（Uninstall）与防灾防护**：
+   - 支持从「已启用」与「未开启」列表中彻底卸载插件并清理本地依赖；
+   - 卸载前强制打快照（`pre_uninstall`），内置保护机制防止误删核心组件及管家自身。
+9. **官方详情页联动、版本更新提醒与吸顶固定操作栏**：
+   - 点击插件直达官方插件详情页并支持一键返回；
+   - 异步检测 npm 新版本并提供一键平滑升级；
+   - 顶部标题与操作栏（安装/快照/应急脚本/刷新）视口吸顶固定，滚动时长驻随时可用。
 
 ---
 
@@ -48,7 +61,7 @@ DeepSeek Harness（桌面版）插件管家与防灾恢复工作台：解决第�
 ### 2. GitHub 渠道（源码安装，tag 定版本）
 
 ```
-github:supertiny99/dsh-plugin-guardian#v0.1.1
+github:supertiny99/dsh-plugin-guardian#v0.1.2
 ```
 
 ### 3. 本地 tarball 离线安装
@@ -56,7 +69,7 @@ github:supertiny99/dsh-plugin-guardian#v0.1.1
 下载 release 的 `.tgz` 包后，在输入框填写本地绝对路径：
 
 ```
-file:/你的绝对路径/supertiny99-dsh-plugin-guardian-0.1.1.tgz
+file:/你的绝对路径/supertiny99-dsh-plugin-guardian-0.1.2.tgz
 ```
 
 > **注意**：安装后请完全退出 DSH 桌面应用并重新打开（冷启动），左侧栏即可出现 **🛡️ 插件管家** 图标。

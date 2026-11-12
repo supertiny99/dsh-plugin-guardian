@@ -5,7 +5,7 @@
 			"imports": []
 		},
 		"src/client.jsx": {
-			"bytes": 33017,
+			"bytes": 33585,
 			"imports": [
 				{
 					"path": "react",
@@ -34,13 +34,13 @@
 			"entryPoint": "src/client.jsx",
 			"inputs": {
 				"src/client.jsx": {
-					"bytesInOutput": 28715
+					"bytesInOutput": 29019
 				},
 				"src/guardian.css": {
 					"bytesInOutput": 10492
 				}
 			},
-			"bytes": 39947
+			"bytes": 40251
 		}
 	}
 }

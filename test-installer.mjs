@@ -23,14 +23,14 @@ console.log('🧪 开始运行 Plugin Guardian 安装器核心单元测试...\n'
 console.log('Step 1: 测试精选 Catalog 状态比对...');
 const mockManifest = {
 	dependencies: {
-		'@supertiny99/dsh-usage-dashboard': '0.1.1',
+		'dsh-plugin-whale-pet': '^0.2.9',
 	},
 	dsh: {
 		profile: {
 			bundles: [
 				'@deepseek-ai/dsh-base',
 				'@deepseek-ai/dsh-web-app',
-				'@supertiny99/dsh-usage-dashboard',
+				'dsh-plugin-whale-pet',
 				GUARDIAN_BUNDLE_NAME,
 			],
 		},
@@ -39,13 +39,13 @@ const mockManifest = {
 
 const enriched = getEnrichedCatalog(mockManifest);
 assert.ok(enriched.length >= 4, 'Catalog 应当包含常用推荐插件');
-const usageItem = enriched.find((it) => it.id === 'usage-dashboard');
-assert.equal(usageItem.isInstalled, true, '已装插件应当被识别为 isInstalled');
-assert.equal(usageItem.isActive, true, '已激活插件应当被识别为 isActive');
+const whaleItem = enriched.find((it) => it.id === 'whale-pet');
+assert.equal(whaleItem.isInstalled, true, '已装插件应当被识别为 isInstalled');
+assert.equal(whaleItem.isActive, true, '已激活插件应当被识别为 isActive');
 
-const zcodeItem = enriched.find((it) => it.id === 'zcode-workbench');
-assert.equal(zcodeItem.isInstalled, false, '未安装插件应当 isInstalled: false');
-assert.equal(zcodeItem.isActive, false, '未激活插件应当 isActive: false');
+const petItem = enriched.find((it) => it.id === 'dsh-pet');
+assert.equal(petItem.isInstalled, false, '未安装插件应当 isInstalled: false');
+assert.equal(petItem.isActive, false, '未激活插件应当 isActive: false');
 console.log('  ✔ Catalog 比对逻辑正确！');
 
 // 2. 测试 normalizeSpec
@@ -98,7 +98,7 @@ try {
 
 	const restoredManifest = JSON.parse(fs.readFileSync(path.join(tmpProfile, 'package.json'), 'utf8'));
 	assert.ok(!restoredManifest.dsh.profile.bundles.includes('bad-plugin'), 'bad-plugin 必须被彻底移除');
-	assert.ok(restoredManifest.dsh.profile.bundles.includes('@supertiny99/dsh-usage-dashboard'));
+	assert.ok(restoredManifest.dsh.profile.bundles.includes('dsh-plugin-whale-pet'));
 	assert.ok(restoredManifest.dsh.profile.bundles.includes(GUARDIAN_BUNDLE_NAME));
 	console.log('  ✔ 安装前安全快照与一键回滚验证通过！');
 } finally {

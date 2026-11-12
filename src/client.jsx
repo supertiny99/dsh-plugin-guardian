@@ -885,13 +885,28 @@ function GuardianPanel() {
 													</div>
 													<div>
 														{item.isInstalled ? (
-															<button
-																className="pg-btn"
-																style={{ padding: '4px 10px', fontSize: 12 }}
-																disabled
-															>
-																已安装
-															</button>
+															item.isActive ? (
+																<button
+																	className="pg-btn"
+																	style={{ padding: '4px 10px', fontSize: 12 }}
+																	disabled
+																>
+																	运行中
+																</button>
+															) : (
+																<button
+																	className="pg-btn pg-btn-secondary"
+																	style={{ padding: '4px 10px', fontSize: 12 }}
+																	onClick={async () => {
+																		await handleToggleBundle(item.name, true);
+																		await fetchCatalog();
+																	}}
+																	disabled={busy || installing}
+																	title="已安装，点击直接加入激活清单"
+																>
+																	一键启用
+																</button>
+															)
 														) : (
 															<button
 																className="pg-btn pg-btn-primary"

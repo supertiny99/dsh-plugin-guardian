@@ -174,6 +174,73 @@ function formatReason(reason, fallbackText) {
 	return REASON_LABELS[reason] || reason;
 }
 
+/* ---------- 详情页返回插件管家联动拦截器 ---------- */
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function' && !window.__dsh_guardian_back_listener_installed__) {
+	window.__dsh_guardian_back_listener_installed__ = true;
+
+	window.addEventListener(
+		'click',
+		(e) => {
+			// 若用户主动点击侧栏其他面板，重置返回目标
+			if (e.target && e.target.closest && (e.target.closest('[class*="sidebar"]') || e.target.closest('[class*="panellist"]'))) {
+				window.__dsh_guardian_return_target__ = false;
+				return;
+			}
+
+			if (!window.__dsh_guardian_return_target__) return;
+
+			const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+			if (!btn) return;
+
+			const ariaLabel = btn.getAttribute ? (btn.getAttribute('aria-label') || '') : '';
+			const className = String(btn.className || '');
+			const btnText = btn.innerText?.trim() || '';
+
+			const isDetailBack =
+				ariaLabel.includes('返回') ||
+				ariaLabel.includes('Back') ||
+				className.includes('crumb') ||
+				className.includes('moreBack') ||
+				btnText === '插件' ||
+				btnText === 'Plugins' ||
+				btnText.includes('返回插件管家') ||
+				(btn.closest && btn.closest('[class*="detailTop"]') && (ariaLabel || className));
+
+			if (isDetailBack) {
+				e.preventDefault();
+				e.stopPropagation();
+				e.stopImmediatePropagation();
+				window.__dsh_guardian_return_target__ = false;
+
+				const ctx = globalThis.__dsh_guardian_ctx__;
+				if (ctx?.layout?.selectPanel) {
+					ctx.layout.selectPanel('plugin-guardian');
+				}
+			}
+		},
+		true // 捕获阶段优先拦截
+	);
+}
+
+function enhanceBackButton() {
+	if (typeof window === 'undefined' || !window.__dsh_guardian_return_target__) return;
+	if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+	const btns = document.querySelectorAll('button');
+	for (const b of btns) {
+		const ariaLabel = b.getAttribute('aria-label') || '';
+		const className = String(b.className || '');
+		if (className.includes('crumb') || ariaLabel.includes('返回') || ariaLabel.includes('Back')) {
+			const span = b.querySelector('span');
+			if (span && !span.dataset.enhanced) {
+				span.dataset.enhanced = 'true';
+				span.textContent = '返回插件管家';
+				b.setAttribute('title', '返回插件管家');
+			}
+		}
+	}
+}
+
 /* ---------- 主面板组件 ---------- */
 
 function GuardianPanel() {
@@ -223,7 +290,12 @@ function GuardianPanel() {
 		const ctx = globalThis.__dsh_guardian_ctx__;
 		const nav = ctx?.get?.('pluginNavigation');
 		if (nav && typeof nav.openBundle === 'function') {
+			window.__dsh_guardian_return_target__ = true;
 			nav.openBundle(pkgName);
+			setTimeout(enhanceBackButton, 60);
+			setTimeout(enhanceBackButton, 200);
+			setTimeout(enhanceBackButton, 500);
+			setTimeout(enhanceBackButton, 1000);
 		} else {
 			showToast(`已请求查看 ${pkgName} 详情，若未自动跳转请点击侧边栏“插件”`);
 		}

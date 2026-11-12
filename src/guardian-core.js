@@ -133,8 +133,10 @@ export function scanPatchBackups(profileDir) {
 	}
 }
 
+let lastSnapshotTimestamp = 0;
+
 /**
- * 创建新快照
+ * 创建新快照（毫秒防碰撞保护）
  */
 export function createSnapshot(profileDir, reason = 'manual') {
 	const snapshotDir = ensureSnapshotDir(profileDir);
@@ -142,7 +144,12 @@ export function createSnapshot(profileDir, reason = 'manual') {
 	const bundles = manifest.dsh?.profile?.bundles || [];
 	const thirdPartyBundles = bundles.filter(isThirdPartyBundle);
 	const patchContent = readPatchContent(profileDir);
-	const now = Date.now();
+	
+	let now = Date.now();
+	if (now <= lastSnapshotTimestamp) {
+		now = lastSnapshotTimestamp + 1;
+	}
+	lastSnapshotTimestamp = now;
 
 	const snapshot = {
 		id: `snap-${now}`,

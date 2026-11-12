@@ -84,14 +84,34 @@ export function readProfileManifest(profileDir) {
 }
 
 /**
- * 安全写入 package.json（临时文件 + rename 原子写）
+ * 安全写入 package.json（临时文件 + rename 原子写 + Windows EBUSY 退避重试）
  */
 export function writeProfileManifestAtomic(profileDir, manifest) {
 	const pkgPath = path.join(profileDir, 'package.json');
 	const tmpPath = path.join(profileDir, `package.json.tmp-${Date.now()}-${process.pid}`);
 	const content = JSON.stringify(manifest, null, 2) + '\n';
 	fs.writeFileSync(tmpPath, content, { encoding: 'utf8', mode: 0o644 });
-	fs.renameSync(tmpPath, pkgPath);
+
+	let retries = 5;
+	while (retries > 0) {
+		try {
+			fs.renameSync(tmpPath, pkgPath);
+			break;
+		} catch (err) {
+			retries--;
+			if ((err.code === 'EBUSY' || err.code === 'EPERM') && retries > 0) {
+				// 针对 Windows 下文件被防病毒或宿主临时占用做微小退避同步等待
+				const waitMs = (5 - retries) * 50;
+				const end = Date.now() + waitMs;
+				while (Date.now() < end) {}
+			} else {
+				try {
+					fs.unlinkSync(tmpPath);
+				} catch {}
+				throw err;
+			}
+		}
+	}
 }
 
 /**
@@ -133,10 +153,36 @@ export function scanPatchBackups(profileDir) {
 	}
 }
 
+/**
+ * 快照数据规范化（向下兼容老版本缺少 schemaVersion 或字段的快照）
+ */
+export function normalizeSnapshot(rawSnapshot) {
+	if (!rawSnapshot || typeof rawSnapshot !== 'object') return null;
+	const bundles = Array.isArray(rawSnapshot.bundles) ? [...rawSnapshot.bundles] : [];
+	const thirdPartyBundles = Array.isArray(rawSnapshot.thirdPartyBundles)
+		? [...rawSnapshot.thirdPartyBundles]
+		: bundles.filter(isThirdPartyBundle);
+
+	return {
+		schemaVersion: 1,
+		id: rawSnapshot.id || `snap-legacy-${Date.now()}`,
+		timestamp: typeof rawSnapshot.timestamp === 'number' ? rawSnapshot.timestamp : Date.now(),
+		timeString: rawSnapshot.timeString || new Date(rawSnapshot.timestamp || Date.now()).toLocaleString(),
+		reason: rawSnapshot.reason || 'manual',
+		reasonText: rawSnapshot.reasonText || translateReason(rawSnapshot.reason),
+		bundles,
+		thirdPartyBundles,
+		dependencies: rawSnapshot.dependencies && typeof rawSnapshot.dependencies === 'object' ? { ...rawSnapshot.dependencies } : {},
+		patchContent: typeof rawSnapshot.patchContent === 'string' ? rawSnapshot.patchContent : '',
+		hasPatch: !!rawSnapshot.hasPatch,
+		totalBundles: bundles.length,
+	};
+}
+
 let lastSnapshotTimestamp = 0;
 
 /**
- * 创建新快照（毫秒防碰撞保护）
+ * 创建新快照（毫秒防碰撞保护 + Schema Versioning）
  */
 export function createSnapshot(profileDir, reason = 'manual') {
 	const snapshotDir = ensureSnapshotDir(profileDir);
@@ -151,18 +197,20 @@ export function createSnapshot(profileDir, reason = 'manual') {
 	}
 	lastSnapshotTimestamp = now;
 
-	const snapshot = {
+	const snapshot = normalizeSnapshot({
+		schemaVersion: 1,
 		id: `snap-${now}`,
 		timestamp: now,
 		timeString: new Date(now).toLocaleString(),
 		reason,
+		reasonText: translateReason(reason),
 		bundles: [...bundles],
 		thirdPartyBundles: [...thirdPartyBundles],
 		dependencies: { ...(manifest.dependencies || {}) },
 		patchContent: patchContent || '',
 		hasPatch: !!patchContent,
 		totalBundles: bundles.length,
-	};
+	});
 
 	const snapPath = path.join(snapshotDir, `${snapshot.id}.json`);
 	fs.writeFileSync(snapPath, JSON.stringify(snapshot, null, 2), 'utf8');
@@ -300,7 +348,7 @@ export function getLatestHealthySnapshot(profileDir) {
 	const healthyPath = path.join(snapshotDir, 'latest-healthy.json');
 	if (fs.existsSync(healthyPath)) {
 		try {
-			return JSON.parse(fs.readFileSync(healthyPath, 'utf8'));
+			return normalizeSnapshot(JSON.parse(fs.readFileSync(healthyPath, 'utf8')));
 		} catch {}
 	}
 	// 若无 latest-healthy，取最近一份有第三方的 snap
@@ -309,7 +357,7 @@ export function getLatestHealthySnapshot(profileDir) {
 		if (item.thirdPartyCount > 0) {
 			try {
 				const full = JSON.parse(fs.readFileSync(path.join(snapshotDir, `${item.id}.json`), 'utf8'));
-				return full;
+				return normalizeSnapshot(full);
 			} catch {}
 		}
 	}
@@ -517,51 +565,56 @@ export function generateOfflineScript(profileDir, outputDir = null) {
 	let scriptContent = '';
 
 	if (isWin) {
-		// Windows 批处理脚本 (.bat)
-		scriptContent = `@echo off
-chcp 65001 >nul
-echo ==================================================
-echo    DSH 插件管家 · 脱机应急恢复 (Windows)
-echo ==================================================
-
-set "PROFILE_DIR=${profileDir.replace(/\//g, '\\')}"
-set "SNAPSHOT_FILE=%PROFILE_DIR%\\.plugin-guardian\\snapshots\\latest-healthy.json"
-set "PKG_FILE=%PROFILE_DIR%\\package.json"
-set "PATCH_FILE=%PROFILE_DIR%\\cordis.patch.yml"
-
-if not exist "%SNAPSHOT_FILE%" (
-    echo [X] 错误: 未找到最近的健康快照: %SNAPSHOT_FILE%
-    echo 请检查快照文件是否存在。
-    pause
-    exit /b 1
-)
-
-node -e "const fs = require('fs'); const path = require('path'); const pDir = process.env.PROFILE_DIR; const sFile = process.env.SNAPSHOT_FILE; const pkgFile = process.env.PKG_FILE; const patchFile = process.env.PATCH_FILE; const snap = JSON.parse(fs.readFileSync(sFile, 'utf8')); const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')); pkg.dsh = pkg.dsh || {}; pkg.dsh.profile = pkg.dsh.profile || {}; pkg.dsh.profile.bundles = snap.bundles; fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + '\\n'); console.log('[OK] 已成功恢复 ' + snap.bundles.length + ' 个插件组合行至 package.json'); try { const baks = fs.readdirSync(pDir).filter(f => f.startsWith('cordis.patch.yml.bak')).sort().reverse(); if (baks.length > 0) { fs.copyFileSync(path.join(pDir, baks[0]), patchFile); console.log('[OK] 已恢复配置: ' + baks[0] + ' -> cordis.patch.yml'); } } catch (e) {}"
-
-if %errorlevel% equ 0 (
-    echo --------------------------------------------------
-    echo [OK] 恢复大功告成！
-    echo 现在请启动/重新打开 DeepSeek Harness 桌面应用即可生效。
-) else (
-    echo [X] 恢复遇到错误，请检查上述提示。
-)
-
-echo ==================================================
-echo 按任意键退出窗口...
-pause >nul
-`;
+		// Windows 批处理脚本 (.bat) — 强制使用 CRLF 换行与 UTF-8 代码页
+		const lines = [
+			'@echo off',
+			'chcp 65001 >nul',
+			'echo ==================================================',
+			'echo    DSH 插件管家 · 脱机应急恢复 (Windows)',
+			'echo ==================================================',
+			'',
+			`set "PROFILE_DIR=${profileDir.replace(/\//g, '\\')}"`,
+			'set "SNAPSHOT_FILE=%PROFILE_DIR%\\.plugin-guardian\\snapshots\\latest-healthy.json"',
+			'set "PKG_FILE=%PROFILE_DIR%\\package.json"',
+			'set "PATCH_FILE=%PROFILE_DIR%\\cordis.patch.yml"',
+			'',
+			'if not exist "%SNAPSHOT_FILE%" (',
+			'    echo [X] 错误: 未找到最近的健康快照: "%SNAPSHOT_FILE%"',
+			'    echo 请检查快照文件是否存在。',
+			'    pause',
+			'    exit /b 1',
+			')',
+			'',
+			'node -e "const fs = require(\'fs\'); const path = require(\'path\'); const pDir = process.env.PROFILE_DIR; const sFile = process.env.SNAPSHOT_FILE; const pkgFile = process.env.PKG_FILE; const patchFile = process.env.PATCH_FILE; const snap = JSON.parse(fs.readFileSync(sFile, \'utf8\')); const pkg = JSON.parse(fs.readFileSync(pkgFile, \'utf8\')); const healthyBundles = snap.bundles || (snap.data && snap.data.bundles) || []; pkg.dsh = pkg.dsh || {}; pkg.dsh.profile = pkg.dsh.profile || {}; pkg.dsh.profile.bundles = healthyBundles; fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + \'\\n\'); console.log(\'[OK] 已成功恢复 \' + healthyBundles.length + \' 个插件组合行至 package.json\'); try { const baks = fs.readdirSync(pDir).filter(f => f.startsWith(\'cordis.patch.yml.bak\')).sort().reverse(); if (baks.length > 0) { fs.copyFileSync(path.join(pDir, baks[0]), patchFile); console.log(\'[OK] 已恢复配置: \' + baks[0] + \' -> cordis.patch.yml\'); } } catch (e) {}"',
+			'',
+			'if %errorlevel% equ 0 (',
+			'    echo --------------------------------------------------',
+			'    echo [OK] 恢复大功告成！',
+			'    echo 现在请启动/重新打开 DeepSeek Harness 桌面应用即可生效。',
+			') else (',
+			'    echo [X] 恢复遇到错误，请检查上述提示。',
+			')',
+			'',
+			'echo ==================================================',
+			'echo 按任意键退出窗口...',
+			'pause >nul',
+			'',
+		];
+		scriptContent = lines.join('\r\n');
 	} else {
-		// macOS / Linux 脚本 (.command / .sh)
+		// macOS / Linux 脚本 (.command / .sh) — 强制严格双引号与 chmod 0o755，带 Python3 兜底
 		scriptContent = `#!/bin/bash
 # ==============================================================================
 # DSH 插件管家 · 脱机应急恢复脚本
 # 双击此脚本，即可脱机一键恢复上次健康的插件激活列表与配置
 # ==============================================================================
 
-PROFILE_DIR="${profileDir}"
-SNAPSHOT_FILE="$PROFILE_DIR/.plugin-guardian/snapshots/latest-healthy.json"
-PKG_FILE="$PROFILE_DIR/package.json"
-PATCH_FILE="$PROFILE_DIR/cordis.patch.yml"
+set -e
+
+export PROFILE_DIR="${profileDir}"
+export SNAPSHOT_FILE="$PROFILE_DIR/.plugin-guardian/snapshots/latest-healthy.json"
+export PKG_FILE="$PROFILE_DIR/package.json"
+export PATCH_FILE="$PROFILE_DIR/cordis.patch.yml"
 
 echo "=================================================="
 echo "   DSH 插件管家 · 脱机应急恢复"
@@ -574,12 +627,13 @@ if [ ! -f "$SNAPSHOT_FILE" ]; then
     exit 1
 fi
 
-node -e "
+if command -v node >/dev/null 2>&1; then
+    node -e "
 const fs = require('fs');
-const snap = JSON.parse(fs.readFileSync('$SNAPSHOT_FILE', 'utf8'));
-const pkg = JSON.parse(fs.readFileSync('$PKG_FILE', 'utf8'));
+const snap = JSON.parse(fs.readFileSync(process.env.SNAPSHOT_FILE, 'utf8'));
+const pkg = JSON.parse(fs.readFileSync(process.env.PKG_FILE, 'utf8'));
 
-const healthyBundles = snap.bundles;
+const healthyBundles = snap.bundles || (snap.data && snap.data.bundles) || [];
 if (!healthyBundles || !healthyBundles.length) {
     console.error('❌ 快照中没有 bundle 数据');
     process.exit(1);
@@ -589,22 +643,38 @@ pkg.dsh = pkg.dsh || {};
 pkg.dsh.profile = pkg.dsh.profile || {};
 pkg.dsh.profile.bundles = healthyBundles;
 
-fs.writeFileSync('$PKG_FILE', JSON.stringify(pkg, null, 2) + '\\n');
+fs.writeFileSync(process.env.PKG_FILE, JSON.stringify(pkg, null, 2) + '\\n');
 console.log('✅ 已成功恢复 ' + healthyBundles.length + ' 个插件组合行至 package.json');
 
-// 恢复 patch.bak（若存在）
 try {
-    const files = fs.readdirSync('$PROFILE_DIR');
+    const files = fs.readdirSync(process.env.PROFILE_DIR);
     const baks = files.filter(f => f.startsWith('cordis.patch.yml.bak')).sort().reverse();
     if (baks.length > 0) {
         const latestBak = baks[0];
-        fs.copyFileSync('$PROFILE_DIR/' + latestBak, '$PATCH_FILE');
+        fs.copyFileSync(require('path').join(process.env.PROFILE_DIR, latestBak), process.env.PATCH_FILE);
         console.log('✅ 已恢复配置: ' + latestBak + ' -> cordis.patch.yml');
     }
 } catch (e) {
     console.warn('⚠️ 检查 patch.bak 略过:', e.message);
 }
 "
+elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import json, os, glob
+with open(os.environ['SNAPSHOT_FILE'], 'r', encoding='utf-8') as sf:
+    snap = json.load(sf)
+with open(os.environ['PKG_FILE'], 'r', encoding='utf-8') as pf:
+    pkg = json.load(pf)
+if 'dsh' not in pkg: pkg['dsh'] = {}
+if 'profile' not in pkg['dsh']: pkg['dsh']['profile'] = {}
+bundles = snap.get('bundles') or (snap.get('data') or {}).get('bundles') or []
+pkg['dsh']['profile']['bundles'] = bundles
+with open(os.environ['PKG_FILE'], 'w', encoding='utf-8') as pf:
+    json.dump(pkg, pf, indent=2, ensure_ascii=False)
+    pf.write('\n')
+print('✅ [Python3 兜底] 已成功恢复 ' + str(len(bundles)) + ' 个插件组合行至 package.json')
+"
+fi
 
 if [ $? -eq 0 ]; then
     echo "--------------------------------------------------"
@@ -622,5 +692,9 @@ read -n 1
 	}
 
 	fs.writeFileSync(scriptPath, scriptContent, { encoding: 'utf8', mode: 0o755 });
+	try {
+		fs.chmodSync(scriptPath, 0o755);
+	} catch {}
+
 	return { scriptPath, fileName: scriptFileName, ok: true, platform: process.platform };
 }

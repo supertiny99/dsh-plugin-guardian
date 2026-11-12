@@ -2,9 +2,9 @@
  * dsh-plugin-guardian · Host 侧入口 (index.js)
  *
  * 职责：
- * 1. 注入 webServer 注册 /plugin-guardian/* 路由
+ * 1. 注入 webServer 注册 /plugin-guardian/* 路由（带全局 safeJson / 异常捕获）
  * 2. 启动时执行健康自动快照与应急脚本就绪
- * 3. 响应前端关于状态、快照、恢复、配置挽回与脚本导出的请求
+ * 3. 响应前端关于状态、快照、恢复、配置挽回、脚本导出、诊断报告等请求
  */
 
 import {
@@ -23,6 +23,9 @@ import {
 import { getEnrichedCatalog } from './catalog.js';
 import { chooseLocalTgzFile, executePluginInstall, executePluginUninstall } from './installer-core.js';
 import { checkPackagesUpdates } from './version-service.js';
+import { generateDiagnosticReport } from './services/diagnostic-service.js';
+import { safeJson } from './utils/safe-route.js';
+import { globalActionMutex } from './utils/mutex.js';
 import path from 'node:path';
 import os from 'node:os';
 import { exec } from 'node:child_process';
@@ -61,14 +64,6 @@ export function apply(ctx, config) {
 				kind: 'prefix',
 				path: '/plugin-guardian',
 				handler: async (req, res) => {
-					const json = (code, value) => {
-						res.writeHead(code, {
-							'content-type': 'application/json; charset=utf-8',
-							'cache-control': 'no-store',
-						});
-						res.end(JSON.stringify(value));
-					};
-
 					try {
 						const url = new URL(req.url, 'http://127.0.0.1');
 						const pathname = url.pathname.replace(/^\/plugin-guardian/, '') || '/';
@@ -76,62 +71,68 @@ export function apply(ctx, config) {
 						// 1. 获取管家整体状态与事故检测
 						if (pathname === '/status' && req.method === 'GET') {
 							const status = getGuardianStatus(profileDir);
-							return json(200, { ok: true, ...status });
+							return safeJson(res, 200, { ok: true, ...status });
 						}
 
 						// 2. 手动创建快照
 						if (pathname === '/snapshot' && req.method === 'POST') {
 							const body = await parseBody(req);
-							const snap = createSnapshot(profileDir, body.reason || 'manual');
-							return json(200, { ok: true, snapshot: snap });
+							const snap = await globalActionMutex.runExclusive('create-snapshot', async () => {
+								return createSnapshot(profileDir, body.reason || 'manual');
+							});
+							return safeJson(res, 200, { ok: true, snapshot: snap });
 						}
 
 						// 3. 列出所有快照
 						if (pathname === '/snapshots' && req.method === 'GET') {
 							const result = listSnapshots(profileDir);
-							return json(200, { ok: true, ...result });
+							return safeJson(res, 200, { ok: true, ...result });
 						}
 
 						// 3.1 删除单个快照
 						if (pathname === '/delete-snapshot' && req.method === 'POST') {
 							const body = await parseBody(req);
 							if (!body.id) {
-								return json(400, { ok: false, error: 'Snapshot id is required' });
+								return safeJson(res, 200, { ok: false, error: 'Snapshot id is required' });
 							}
-							const res = deleteSnapshot(profileDir, body.id);
-							return json(res.ok ? 200 : 404, res);
+							const result = await globalActionMutex.runExclusive('delete-snapshot', async () => {
+								return deleteSnapshot(profileDir, body.id);
+							});
+							return safeJson(res, 200, result);
 						}
 
-						// 3.2 一键清理多余旧快照（保留最新 2 份）
+						// 3.2 一键清理多余旧快照（保留最新 N 份）
 						if (pathname === '/clean-snapshots' && req.method === 'POST') {
 							const body = await parseBody(req);
-							const res = cleanOldSnapshots(profileDir, body.keepCount || 2);
-							return json(200, res);
+							const result = await globalActionMutex.runExclusive('clean-snapshots', async () => {
+								return cleanOldSnapshots(profileDir, body.keepCount || 2);
+							});
+							return safeJson(res, 200, result);
 						}
 
-						// 4. 执行插件恢复
+						// 4. 执行插件恢复（带排他锁）
 						if (pathname === '/restore' && req.method === 'POST') {
 							const body = await parseBody(req);
 							const selected = body.bundles;
 							if (!Array.isArray(selected)) {
-								return json(400, { ok: false, error: 'bundles array is required' });
+								return safeJson(res, 200, { ok: false, error: 'bundles array is required' });
 							}
-							const result = restoreBundles(profileDir, selected, !!body.restorePatch);
-							return json(200, result);
+							const result = await globalActionMutex.runExclusive('restore-bundles', async () => {
+								return restoreBundles(profileDir, selected, !!body.restorePatch);
+							});
+							return safeJson(res, 200, result);
 						}
 
 						// 4.1 手动启用或停用单个插件
 						if (pathname === '/toggle-bundle' && req.method === 'POST') {
 							const body = await parseBody(req);
 							if (!body.bundle) {
-								return json(400, { ok: false, error: 'bundle is required' });
+								return safeJson(res, 200, { ok: false, error: 'bundle is required' });
 							}
-							try {
-								const result = toggleBundleState(profileDir, body.bundle, !!body.enabled);
-								return json(200, result);
-							} catch (e) {
-								return json(400, { ok: false, error: e.message });
-							}
+							const result = await globalActionMutex.runExclusive(`toggle-bundle:${body.bundle}`, async () => {
+								return toggleBundleState(profileDir, body.bundle, !!body.enabled);
+							});
+							return safeJson(res, 200, result);
 						}
 
 						// 5. 挽回 patch.bak 配置
@@ -140,10 +141,12 @@ export function apply(ctx, config) {
 							const status = getGuardianStatus(profileDir);
 							const targetBak = body.fileName || status.bakFiles?.[0]?.fileName;
 							if (!targetBak) {
-								return json(400, { ok: false, error: 'No bak file found to restore' });
+								return safeJson(res, 200, { ok: false, error: 'No bak file found to restore' });
 							}
-							const result = restorePatch(profileDir, targetBak);
-							return json(200, result);
+							const result = await globalActionMutex.runExclusive('restore-patch', async () => {
+								return restorePatch(profileDir, targetBak);
+							});
+							return safeJson(res, 200, result);
 						}
 
 						// 6. 导出脱机应急脚本到桌面
@@ -157,60 +160,63 @@ export function apply(ctx, config) {
 									exec(`explorer.exe /select,"${result.scriptPath.replace(/\//g, '\\')}"`);
 								}
 							} catch {}
-							return json(200, { ok: true, target: result.scriptPath, fileName: result.fileName });
+							return safeJson(res, 200, { ok: true, target: result.scriptPath, fileName: result.fileName });
 						}
 
 						// 7. 获取精选插件目录及安装状态
 						if (pathname === '/catalog' && req.method === 'GET') {
 							const manifest = readProfileManifest(profileDir);
 							const catalog = getEnrichedCatalog(manifest);
-							return json(200, { ok: true, catalog });
+							return safeJson(res, 200, { ok: true, catalog });
 						}
 
 						// 8. 唤起系统文件选择框选取本地 .tgz
 						if (pathname === '/choose-file' && req.method === 'POST') {
 							const result = await chooseLocalTgzFile();
-							return json(result.ok ? 200 : 400, result);
+							return safeJson(res, 200, result);
 						}
 
-						// 9. 执行插件安装（安装前强制健康快照）
+						// 9. 执行插件安装（内部已包裹排他锁与事务回滚）
 						if (pathname === '/install' && req.method === 'POST') {
 							const body = await parseBody(req);
 							if (!body.spec) {
-								return json(400, { ok: false, error: 'spec is required' });
+								return safeJson(res, 200, { ok: false, error: 'spec is required' });
 							}
-							try {
-								const result = await executePluginInstall(profileDir, body.spec);
-								return json(200, result);
-							} catch (e) {
-								return json(500, { ok: false, error: e.message });
-							}
+							const result = await executePluginInstall(profileDir, body.spec);
+							return safeJson(res, 200, result);
 						}
 
-						// 10. 执行插件彻底卸载（卸载前强制健康快照）
+						// 10. 执行插件彻底卸载（内部已包裹排他锁）
 						if (pathname === '/uninstall' && req.method === 'POST') {
 							const body = await parseBody(req);
 							if (!body.packageName) {
-								return json(400, { ok: false, error: 'packageName is required' });
+								return safeJson(res, 200, { ok: false, error: 'packageName is required' });
 							}
-							try {
-								const result = await executePluginUninstall(profileDir, body.packageName);
-								return json(200, result);
-							} catch (e) {
-								return json(500, { ok: false, error: e.message });
-							}
+							const result = await executePluginUninstall(profileDir, body.packageName);
+							return safeJson(res, 200, result);
 						}
 
 						// 11. 检查插件最新版本与更新
 						if (pathname === '/check-updates' && req.method === 'GET') {
 							const status = getGuardianStatus(profileDir);
 							const result = await checkPackagesUpdates(profileDir, status.allInstalledThirdParty || []);
-							return json(200, { ok: true, ...result });
+							return safeJson(res, 200, { ok: true, ...result });
 						}
 
-						return json(404, { ok: false, error: 'Not Found' });
+						// 12. 现场诊断包一键生成
+						if (pathname === '/diagnostic' && req.method === 'GET') {
+							const report = generateDiagnosticReport(profileDir);
+							return safeJson(res, 200, { ok: true, report });
+						}
+
+						return safeJson(res, 404, { ok: false, error: 'Not Found' });
 					} catch (err) {
-						return json(500, { ok: false, error: err.message });
+						console.error('[plugin-guardian] Handler caught fatal exception:', err);
+						return safeJson(res, 200, {
+							ok: false,
+							error: err?.message || '内部服务异常',
+							code: err?.code || 'INTERNAL_ERROR',
+						});
 					}
 				},
 			})

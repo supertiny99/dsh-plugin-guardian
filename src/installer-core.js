@@ -16,6 +16,7 @@ import {
 	createSnapshot,
 	GUARDIAN_BUNDLE_NAME,
 } from './guardian-core.js';
+import { globalActionMutex } from './utils/mutex.js';
 
 /**
  * 跨平台调起系统原生文件选择器选取本地 .tgz
@@ -101,153 +102,178 @@ export function normalizeSpec(rawSpec) {
  * @param {string} rawSpec 用户输入的 spec (npm 包名 / file:... / github:...)
  */
 export async function executePluginInstall(profileDir, rawSpec) {
-	const spec = normalizeSpec(rawSpec);
-
-	// 步骤 1: 读取安装前的 manifest
-	const beforeManifest = readProfileManifest(profileDir);
-	const beforeDeps = Object.keys(beforeManifest.dependencies || {});
-
-	// 步骤 2: 强制执行安装前健康快照 (Pre-install Snapshot)
-	const preSnap = createSnapshot(profileDir, 'pre_install');
-
-	// 步骤 3: 确定执行器并调用包管理工具执行安装
-	const executor = resolvePnpmExecutor();
-	let installCmd = '';
-
-	if (executor.type === 'node_script') {
-		// 使用宿主 node 执行内置 pnpm.mjs add <spec>
-		installCmd = `node "${executor.script}" add "${spec}"`;
-	} else if (executor.command === 'pnpm') {
-		installCmd = `pnpm add "${spec}"`;
-	} else {
-		installCmd = `npm install "${spec}" --save`;
-	}
-
-	// 执行安装（超时 120 秒）
-	const outputLog = await new Promise((resolve, reject) => {
-		exec(
-			installCmd,
-			{
-				cwd: profileDir,
-				timeout: 120_000,
-				env: {
-					...process.env,
-					PATH: `/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${process.env.PATH || ''}`,
-				},
-			},
-			(err, stdout, stderr) => {
-				const fullLog = (stdout || '') + '\n' + (stderr || '');
-				if (err) {
-					const errorMsg = `安装命令执行失败: ${err.message}\n${fullLog}`;
-					return reject(new Error(errorMsg));
-				}
-				resolve(fullLog);
-			}
-		);
-	});
-
-	// 步骤 4: 读取安装后的 manifest，找出新增加的包名
-	const afterManifest = readProfileManifest(profileDir);
-	const afterDeps = Object.keys(afterManifest.dependencies || {});
-	const newDeps = afterDeps.filter((d) => !beforeDeps.includes(d));
-
-	let installedPkgName = null;
-	if (newDeps.length > 0) {
-		installedPkgName = newDeps[0];
-	} else {
-		// 若已存在依赖更新，从 spec 推导包名
-		const cleanSpec = spec.replace(/^file:/, '').replace(/^github:[^/]+\//, '');
-		const match = cleanSpec.match(/^(@[^/]+\/[^@]+|[^@]+)/);
-		if (match) installedPkgName = match[1];
-	}
-
-	// 步骤 5: 将新安装的包自动写入 dsh.profile.bundles（默认激活）
-	if (installedPkgName) {
-		afterManifest.dsh = afterManifest.dsh || {};
-		afterManifest.dsh.profile = afterManifest.dsh.profile || {};
-		afterManifest.dsh.profile.bundles = afterManifest.dsh.profile.bundles || [];
-
-		if (!afterManifest.dsh.profile.bundles.includes(installedPkgName)) {
-			afterManifest.dsh.profile.bundles.push(installedPkgName);
-			writeProfileManifestAtomic(profileDir, afterManifest);
+	return await globalActionMutex.runExclusive(
+		`install:${rawSpec}`,
+		async () => {
+			const spec = normalizeSpec(rawSpec);
+		const pkgPath = path.join(profileDir, 'package.json');
+		let originalManifestContent = null;
+		if (fs.existsSync(pkgPath)) {
+			originalManifestContent = fs.readFileSync(pkgPath, 'utf8');
 		}
-	}
 
-	// 步骤 6: 记录安装后快照
-	createSnapshot(profileDir, 'after_install');
+		// 步骤 1: 读取安装前的 manifest
+		const beforeManifest = readProfileManifest(profileDir);
+		const beforeDeps = Object.keys(beforeManifest.dependencies || {});
 
-	return {
-		ok: true,
-		spec,
-		installedPackage: installedPkgName,
-		preSnapshotId: preSnap?.id,
-		needRestart: true,
-		log: outputLog,
-	};
+		// 步骤 2: 强制执行安装前健康快照 (Pre-install Snapshot)
+		const preSnap = createSnapshot(profileDir, 'pre_install');
+
+		// 步骤 3: 确定执行器并调用包管理工具执行安装
+		const executor = resolvePnpmExecutor();
+		let installCmd = '';
+
+		if (executor.type === 'node_script') {
+			// 使用宿主 node 执行内置 pnpm.mjs add <spec>
+			installCmd = `node "${executor.script}" add "${spec}"`;
+		} else if (executor.command === 'pnpm') {
+			installCmd = `pnpm add "${spec}"`;
+		} else {
+			installCmd = `npm install "${spec}" --save`;
+		}
+
+		// 执行安装（超时 120 秒）
+		let outputLog = '';
+		try {
+			outputLog = await new Promise((resolve, reject) => {
+				exec(
+					installCmd,
+					{
+						cwd: profileDir,
+						timeout: 120_000,
+						env: {
+							...process.env,
+							PATH: `/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${process.env.PATH || ''}`,
+						},
+					},
+					(err, stdout, stderr) => {
+						const fullLog = (stdout || '') + '\n' + (stderr || '');
+						if (err) {
+							const errorMsg = `安装命令执行失败: ${err.message}\n${fullLog}`;
+							return reject(new Error(errorMsg));
+						}
+						resolve(fullLog);
+					}
+				);
+			});
+
+			// 步骤 4: 读取安装后的 manifest，找出新增加的包名
+			const afterManifest = readProfileManifest(profileDir);
+			const afterDeps = Object.keys(afterManifest.dependencies || {});
+			const newDeps = afterDeps.filter((d) => !beforeDeps.includes(d));
+
+			let installedPkgName = null;
+			if (newDeps.length > 0) {
+				installedPkgName = newDeps[0];
+			} else {
+				// 若已存在依赖更新，从 spec 推导包名
+				const cleanSpec = spec.replace(/^file:/, '').replace(/^github:[^/]+\//, '');
+				const match = cleanSpec.match(/^(@[^/]+\/[^@]+|[^@]+)/);
+				if (match) installedPkgName = match[1];
+			}
+
+			// 步骤 5: 将新安装的包自动写入 dsh.profile.bundles（默认激活）
+			if (installedPkgName) {
+				afterManifest.dsh = afterManifest.dsh || {};
+				afterManifest.dsh.profile = afterManifest.dsh.profile || {};
+				afterManifest.dsh.profile.bundles = afterManifest.dsh.profile.bundles || [];
+
+				if (!afterManifest.dsh.profile.bundles.includes(installedPkgName)) {
+					afterManifest.dsh.profile.bundles.push(installedPkgName);
+					writeProfileManifestAtomic(profileDir, afterManifest);
+				}
+			}
+
+			// 步骤 6: 记录安装后快照
+			createSnapshot(profileDir, 'after_install');
+
+			return {
+				ok: true,
+				spec,
+				installedPackage: installedPkgName,
+				preSnapshotId: preSnap?.id,
+				needRestart: true,
+				log: outputLog,
+			};
+		} catch (installErr) {
+			console.warn(`[plugin-guardian][Installer] 安装 [${spec}] 失败，正在执行事务回滚...`, installErr.message);
+			if (originalManifestContent) {
+				try {
+					fs.writeFileSync(pkgPath, originalManifestContent, 'utf8');
+					console.log('[plugin-guardian][Installer] 事务回滚成功：已还原安装前 package.json');
+				} catch (rollbackErr) {
+					console.error('[plugin-guardian][Installer] 事务回滚异常:', rollbackErr);
+				}
+			}
+			throw installErr;
+		}
+	}, 130_000);
 }
 
 /**
- * 执行插件彻底卸载流水线
+ * 执行插件彻底卸载流水线（带事务排他锁）
  * @param {string} profileDir Profile 根目录
  * @param {string} pkgName 要卸载的包名（如 "dsh-pet"）
  */
 export async function executePluginUninstall(profileDir, pkgName) {
-	if (!pkgName || typeof pkgName !== 'string') {
-		throw new Error('卸载目标包名不能为空');
-	}
-	const targetPkg = pkgName.trim();
-
-	// 1. 安全保护：核心底座与插件管家自身严禁卸载
-	if (
-		targetPkg === GUARDIAN_BUNDLE_NAME ||
-		targetPkg === 'dsh-plugin-guardian' ||
-		targetPkg.startsWith('@deepseek-ai/')
-	) {
-		throw new Error(`安全保护：禁止卸载核心组件或插件管家自身 (${targetPkg})`);
-	}
-
-	// 2. 卸载前强制健康快照 (Pre-uninstall Snapshot)
-	const preSnap = createSnapshot(profileDir, 'pre_uninstall');
-
-	// 3. 更新 package.json：从 bundles 中移除，从 dependencies 中移除
-	const manifest = readProfileManifest(profileDir);
-	let bundlesModified = false;
-	let depsModified = false;
-
-	if (manifest.dsh?.profile?.bundles && Array.isArray(manifest.dsh.profile.bundles)) {
-		const beforeCount = manifest.dsh.profile.bundles.length;
-		manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter((b) => b !== targetPkg);
-		if (manifest.dsh.profile.bundles.length !== beforeCount) {
-			bundlesModified = true;
+	return await globalActionMutex.runExclusive(`uninstall:${pkgName}`, async () => {
+		if (!pkgName || typeof pkgName !== 'string') {
+			throw new Error('卸载目标包名不能为空');
 		}
-	}
+		const targetPkg = pkgName.trim();
 
-	if (manifest.dependencies && manifest.dependencies[targetPkg]) {
-		delete manifest.dependencies[targetPkg];
-		depsModified = true;
-	}
-
-	if (bundlesModified || depsModified) {
-		writeProfileManifestAtomic(profileDir, manifest);
-	}
-
-	// 4. 清理 node_modules 中的包文件/软链目录
-	const targetDir = path.join(profileDir, 'node_modules', ...targetPkg.split('/'));
-	try {
-		if (fs.existsSync(targetDir)) {
-			fs.rmSync(targetDir, { recursive: true, force: true });
+		// 1. 安全保护：核心底座与插件管家自身严禁卸载
+		if (
+			targetPkg === GUARDIAN_BUNDLE_NAME ||
+			targetPkg === 'dsh-plugin-guardian' ||
+			targetPkg.startsWith('@deepseek-ai/')
+		) {
+			throw new Error(`安全保护：禁止卸载核心组件或插件管家自身 (${targetPkg})`);
 		}
-	} catch (e) {
-		// 容忍非致命清理失败
-	}
 
-	// 5. 记录卸载后快照
-	createSnapshot(profileDir, 'after_uninstall');
+		// 2. 卸载前强制健康快照 (Pre-uninstall Snapshot)
+		const preSnap = createSnapshot(profileDir, 'pre_uninstall');
 
-	return {
-		ok: true,
-		uninstalledPackage: targetPkg,
-		preSnapshotId: preSnap?.id,
-		needRestart: true,
-	};
+		// 3. 更新 package.json：从 bundles 中移除，从 dependencies 中移除
+		const manifest = readProfileManifest(profileDir);
+		let bundlesModified = false;
+		let depsModified = false;
+
+		if (manifest.dsh?.profile?.bundles && Array.isArray(manifest.dsh.profile.bundles)) {
+			const beforeCount = manifest.dsh.profile.bundles.length;
+			manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter((b) => b !== targetPkg);
+			if (manifest.dsh.profile.bundles.length !== beforeCount) {
+				bundlesModified = true;
+			}
+		}
+
+		if (manifest.dependencies && manifest.dependencies[targetPkg]) {
+			delete manifest.dependencies[targetPkg];
+			depsModified = true;
+		}
+
+		if (bundlesModified || depsModified) {
+			writeProfileManifestAtomic(profileDir, manifest);
+		}
+
+		// 4. 清理 node_modules 中的包文件/软链目录
+		const targetDir = path.join(profileDir, 'node_modules', ...targetPkg.split('/'));
+		try {
+			if (fs.existsSync(targetDir)) {
+				fs.rmSync(targetDir, { recursive: true, force: true });
+			}
+		} catch (e) {
+			// 容忍非致命清理失败
+		}
+
+		// 5. 记录卸载后快照
+		createSnapshot(profileDir, 'after_uninstall');
+
+		return {
+			ok: true,
+			uninstalledPackage: targetPkg,
+			preSnapshotId: preSnap?.id,
+			needRestart: true,
+		};
+	});
 }

@@ -4,8 +4,19 @@
 			"bytes": 12191,
 			"imports": []
 		},
+		"src/components/ErrorBoundary.jsx": {
+			"bytes": 2426,
+			"imports": [
+				{
+					"path": "react",
+					"kind": "import-statement",
+					"external": true
+				}
+			],
+			"format": "esm"
+		},
 		"src/client.jsx": {
-			"bytes": 44464,
+			"bytes": 45897,
 			"imports": [
 				{
 					"path": "react",
@@ -16,6 +27,11 @@
 					"path": "src/guardian.css",
 					"kind": "import-statement",
 					"original": "./guardian.css"
+				},
+				{
+					"path": "src/components/ErrorBoundary.jsx",
+					"kind": "import-statement",
+					"original": "./components/ErrorBoundary.jsx"
 				}
 			],
 			"format": "esm"
@@ -28,19 +44,27 @@
 					"path": "react",
 					"kind": "require-call",
 					"external": true
+				},
+				{
+					"path": "react",
+					"kind": "require-call",
+					"external": true
 				}
 			],
 			"exports": [],
 			"entryPoint": "src/client.jsx",
 			"inputs": {
 				"src/client.jsx": {
-					"bytesInOutput": 37250
+					"bytesInOutput": 38543
 				},
 				"src/guardian.css": {
 					"bytesInOutput": 12415
+				},
+				"src/components/ErrorBoundary.jsx": {
+					"bytesInOutput": 1854
 				}
 			},
-			"bytes": 50405
+			"bytes": 53555
 		}
 	}
 }

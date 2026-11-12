@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import guardianCss from './guardian.css';
+import { GuardianErrorBoundary } from './components/ErrorBoundary.jsx';
 
 /* ---------- 纯矢量 SVG 图标集 (无 emoji) ---------- */
 
@@ -55,6 +56,16 @@ const IconRefresh = ({ size = 14 }) => (
 	<SvgIcon size={size}>
 		<polyline points="23 4 23 10 17 10" />
 		<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+	</SvgIcon>
+);
+
+const IconFileText = ({ size = 14 }) => (
+	<SvgIcon size={size}>
+		<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+		<polyline points="14 2 14 8 20 8" />
+		<line x1="16" y1="13" x2="8" y2="13" />
+		<line x1="16" y1="17" x2="8" y2="17" />
+		<polyline points="10 9 9 9 8 9" />
 	</SvgIcon>
 );
 
@@ -609,6 +620,28 @@ function GuardianPanel() {
 		}
 	};
 
+	// 一键复制环境脱敏诊断信息
+	const handleCopyDiagnostic = async () => {
+		try {
+			setBusy(true);
+			const res = await fetch('/plugin-guardian/diagnostic');
+			const data = await res.json();
+			if (data.ok && data.report) {
+				const text = JSON.stringify(data.report, null, 2);
+				if (navigator.clipboard?.writeText) {
+					await navigator.clipboard.writeText(text);
+				}
+				showToast('已复制环境诊断信息至剪贴板，便于提报排障');
+			} else {
+				showToast('获取诊断信息失败');
+			}
+		} catch (err) {
+			showToast('诊断请求异常: ' + err.message);
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	if (loading && !status) {
 		return (
 			<div className="pg-container">
@@ -681,6 +714,15 @@ function GuardianPanel() {
 					>
 						<IconTerminal size={14} />
 						<span>导出桌面应急脚本</span>
+					</button>
+					<button
+						className="pg-btn"
+						onClick={handleCopyDiagnostic}
+						disabled={busy}
+						title="一键复制脱敏的环境状态诊断报告，便于提报排查"
+					>
+						<IconFileText size={14} />
+						<span>复制诊断</span>
 					</button>
 					<button className="pg-btn" onClick={fetchStatus} disabled={busy}>
 						<IconRefresh size={14} />
@@ -1323,6 +1365,14 @@ function PanelIcon({ size = 20, active = false }) {
 	);
 }
 
+function SafeGuardianPanel(props) {
+	return (
+		<GuardianErrorBoundary>
+			<GuardianPanel {...props} />
+		</GuardianErrorBoundary>
+	);
+}
+
 export const inject = ['slots', 'layout'];
 
 export function apply(ctx) {
@@ -1337,7 +1387,7 @@ export function apply(ctx) {
 	ctx.slots.inject('main', () =>
 		ctx.slots.register(
 			{ name: 'main', key: 'plugin-guardian' },
-			GuardianPanel
+			SafeGuardianPanel
 		)
 	);
 }

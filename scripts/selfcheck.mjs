@@ -44,6 +44,22 @@ const run = new Function('window', 'require', `"use strict";\n${source}`);
 run(window, fakeRequire);
 
 const failures = [];
+
+// 校验 1: 读取 meta.json 严查 external 依赖泄漏
+try {
+	const metaRaw = await readFile('dist/meta.json', 'utf8');
+	const meta = JSON.parse(metaRaw);
+	const bundledInputs = Object.keys(meta.inputs || {});
+	for (const shared of SHARED) {
+		const leaked = bundledInputs.filter((f) => f.includes(`node_modules/${shared}/`) || f.startsWith(shared));
+		if (leaked.length > 0) {
+			failures.push(`[FATAL] 宿主共享单例依赖意外被打包进 bundle: ${shared} (${leaked.join(', ')})`);
+		}
+	}
+} catch (e) {
+	// 若 meta.json 不存在暂不阻塞纯 JS 执行校验
+}
+
 if (!registered) failures.push('产物未调用 __ModuleLoader__.load 注册');
 const exports = registered?.factory(fakeRequire);
 if (!exports || typeof exports.apply !== 'function') {

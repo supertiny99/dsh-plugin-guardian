@@ -45,6 +45,16 @@ export const FEATURED_CATALOG = [
 		spec: '@deepseek-harness-tui/dsh-tui',
 		badge: '终端神器',
 	},
+	{
+		id: 'changelog-viewer',
+		name: '@supertiny99/dsh-changelog-viewer',
+		title: '更新日志 (Changelog)',
+		category: '系统工具',
+		author: 'supertiny99',
+		description: 'DSH 官方版本更新日志浏览与更新前置确认：聚合 Releases 时间线、中英双语与 Markdown 详情，新版本更新前先看变更再决定下载。',
+		spec: 'file:/Users/supertiny/Myproject/dsh/plugin/changelog-viewer/supertiny99-dsh-changelog-viewer-0.1.0.tgz',
+		badge: '官方精选',
+	},
 ];
 
 /**

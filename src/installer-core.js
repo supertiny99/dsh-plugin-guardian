@@ -166,10 +166,17 @@ export async function executePluginInstall(profileDir, rawSpec) {
 			if (newDeps.length > 0) {
 				installedPkgName = newDeps[0];
 			} else {
-				// 若已存在依赖更新，从 spec 推导包名
-				const cleanSpec = spec.replace(/^file:/, '').replace(/^github:[^/]+\//, '');
-				const match = cleanSpec.match(/^(@[^/]+\/[^@]+|[^@]+)/);
-				if (match) installedPkgName = match[1];
+				// 若已存在依赖更新，优先在 dependencies 中寻找匹配当前 spec 的包名
+				const matchedEntry = Object.entries(afterManifest.dependencies || {}).find(
+					([name, val]) => val === spec || val === `file:${spec}` || (spec.startsWith('file:') && val === spec)
+				);
+				if (matchedEntry) {
+					installedPkgName = matchedEntry[0];
+				} else if (!spec.includes('/') && !spec.includes('\\')) {
+					// 仅对非路径的合法 npm 包名进行正则提取
+					const match = spec.match(/^(@[^/]+\/[^@]+|[^@]+)/);
+					if (match) installedPkgName = match[1];
+				}
 			}
 
 			// 步骤 5: 将新安装的包自动写入 dsh.profile.bundles（默认激活）

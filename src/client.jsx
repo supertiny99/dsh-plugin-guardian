@@ -418,7 +418,18 @@ function GuardianPanel() {
 			});
 			const result = await res.json();
 			if (result.ok) {
-				showToast(`插件 ${result.installedPackage || specToInstall} 安装成功！请完全退出并重启 DSH 生效`);
+				const pkgName = result.installedPackage || specToInstall;
+				if (result.upgraded) {
+					const verChange = result.fromVersion && result.toVersion
+						? ` (v${result.fromVersion} → v${result.toVersion})`
+						: (result.toVersion ? ` 至 v${result.toVersion}` : '');
+					showToast(`插件 ${pkgName} 已成功升级${verChange}！请完全退出并重启 DSH 生效`);
+				} else if (result.isNoOp) {
+					showToast(`插件 ${pkgName} 当前已处于目标版本 (v${result.toVersion || result.fromVersion || '当前版本'})，未发生变更`);
+				} else {
+					const verText = result.toVersion ? ` (v${result.toVersion})` : '';
+					showToast(`插件 ${pkgName}${verText} 安装成功！请完全退出并重启 DSH 生效`);
+				}
 				setShowInstallModal(false);
 				setLocalFile(null);
 				setCustomSpec('');
@@ -857,7 +868,7 @@ function GuardianPanel() {
 										{upInfo?.hasUpdate && (
 											<button
 												className="pg-update-tag"
-												onClick={() => handleInstallPlugin(bundle)}
+												onClick={() => handleInstallPlugin(`${bundle}@${upInfo.latestVersion}`)}
 												title="检测到新版本，点击一键平滑升级"
 												disabled={installing}
 											>
@@ -942,7 +953,7 @@ function GuardianPanel() {
 											{upInfo?.hasUpdate && (
 												<button
 													className="pg-update-tag"
-													onClick={() => handleInstallPlugin(pkg)}
+													onClick={() => handleInstallPlugin(`${pkg}@${upInfo.latestVersion}`)}
 													title="检测到新版本，点击一键更新"
 													disabled={installing}
 												>

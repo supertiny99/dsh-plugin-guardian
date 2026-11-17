@@ -16,6 +16,11 @@ import {
 	createSnapshot,
 	GUARDIAN_BUNDLE_NAME,
 } from './guardian-core.js';
+import {
+	getInstalledPackagesMeta,
+	queryNpmLatestVersion,
+	isNewerVersion,
+} from './version-service.js';
 import { globalActionMutex } from './utils/mutex.js';
 
 /**
@@ -105,35 +110,74 @@ export async function executePluginInstall(profileDir, rawSpec) {
 	return await globalActionMutex.runExclusive(
 		`install:${rawSpec}`,
 		async () => {
-			const spec = normalizeSpec(rawSpec);
+			let spec = normalizeSpec(rawSpec);
 		const pkgPath = path.join(profileDir, 'package.json');
 		let originalManifestContent = null;
 		if (fs.existsSync(pkgPath)) {
 			originalManifestContent = fs.readFileSync(pkgPath, 'utf8');
 		}
 
-		// 步骤 1: 读取安装前的 manifest
+		// 步骤 1: 读取安装前的 manifest 与依赖
 		const beforeManifest = readProfileManifest(profileDir);
 		const beforeDeps = Object.keys(beforeManifest.dependencies || {});
+
+		// 智能决议目标包名与版本参数
+		let targetPkgName = null;
+		let explicitVersion = null;
+		if (
+			!spec.startsWith('file:') &&
+			!spec.startsWith('link:') &&
+			!spec.startsWith('github:') &&
+			!spec.startsWith('git+') &&
+			!spec.startsWith('http://') &&
+			!spec.startsWith('https://')
+		) {
+			const m = spec.match(/^(@[^/@]+(?:\/[^/@]+)?|[^/@]+)(?:@(.+))?$/);
+			if (m) {
+				targetPkgName = m[1];
+				explicitVersion = m[2] || null;
+				// 若当前 Profile 已安装该包且用户输入裸包名，自动探查 registry 补全版本号以打破 lockfile 锁定
+				if (beforeDeps.includes(targetPkgName) && !explicitVersion) {
+					try {
+						const latestVer = await queryNpmLatestVersion(targetPkgName);
+						if (latestVer) {
+							spec = `${targetPkgName}@${latestVer}`;
+							explicitVersion = latestVer;
+						}
+					} catch {
+						// 探查失败时退回原 spec
+					}
+				}
+			}
+		}
+
+		// 记录安装前真实版本
+		let beforeVersion = null;
+		if (targetPkgName) {
+			const meta = getInstalledPackagesMeta(profileDir, [targetPkgName]);
+			beforeVersion = meta[targetPkgName]?.version || null;
+		}
 
 		// 步骤 2: 强制执行安装前健康快照 (Pre-install Snapshot)
 		const preSnap = createSnapshot(profileDir, 'pre_install');
 
 		// 步骤 3: 确定执行器并调用包管理工具执行安装
 		const executor = resolvePnpmExecutor();
+		const nodeBin = process.execPath;
 		let installCmd = '';
 
 		if (executor.type === 'node_script') {
-			// 使用宿主 node 执行内置 pnpm.mjs add <spec>
-			installCmd = `node "${executor.script}" add "${spec}"`;
+			// 使用当前 Node 解释器执行内置 pnpm.mjs add <spec>
+			installCmd = `"${nodeBin}" "${executor.script}" add --config.verify-deps-before-run=false "${spec}"`;
 		} else if (executor.command === 'pnpm') {
-			installCmd = `pnpm add "${spec}"`;
+			installCmd = `pnpm add --config.verify-deps-before-run=false "${spec}"`;
 		} else {
 			installCmd = `npm install "${spec}" --save`;
 		}
 
 		// 执行安装（超时 120 秒）
 		let outputLog = '';
+		const nodeDir = path.dirname(process.execPath);
 		try {
 			outputLog = await new Promise((resolve, reject) => {
 				exec(
@@ -143,7 +187,8 @@ export async function executePluginInstall(profileDir, rawSpec) {
 						timeout: 120_000,
 						env: {
 							...process.env,
-							PATH: `/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${process.env.PATH || ''}`,
+							npm_config_verify_deps_before_run: 'false',
+							PATH: `${nodeDir}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${process.env.PATH || ''}`,
 						},
 					},
 					(err, stdout, stderr) => {
@@ -157,7 +202,7 @@ export async function executePluginInstall(profileDir, rawSpec) {
 				);
 			});
 
-			// 步骤 4: 读取安装后的 manifest，找出新增加的包名
+			// 步骤 4: 读取安装后的 manifest，找出安装的包名
 			const afterManifest = readProfileManifest(profileDir);
 			const afterDeps = Object.keys(afterManifest.dependencies || {});
 			const newDeps = afterDeps.filter((d) => !beforeDeps.includes(d));
@@ -172,6 +217,8 @@ export async function executePluginInstall(profileDir, rawSpec) {
 				);
 				if (matchedEntry) {
 					installedPkgName = matchedEntry[0];
+				} else if (targetPkgName) {
+					installedPkgName = targetPkgName;
 				} else if (!spec.includes('/') && !spec.includes('\\')) {
 					// 仅对非路径的合法 npm 包名进行正则提取
 					const match = spec.match(/^(@[^/]+\/[^@]+|[^@]+)/);
@@ -191,7 +238,22 @@ export async function executePluginInstall(profileDir, rawSpec) {
 				}
 			}
 
-			// 步骤 6: 记录安装后快照
+			// 步骤 6: 核验真实版本变化
+			let afterVersion = null;
+			if (installedPkgName) {
+				const metaAfter = getInstalledPackagesMeta(profileDir, [installedPkgName]);
+				afterVersion = metaAfter[installedPkgName]?.version || null;
+			}
+
+			const isNewInstall = installedPkgName ? !beforeDeps.includes(installedPkgName) : false;
+			const isUpgrade = Boolean(
+				beforeVersion &&
+				afterVersion &&
+				(isNewerVersion(beforeVersion, afterVersion) || beforeVersion !== afterVersion)
+			);
+			const isNoOp = Boolean(!isNewInstall && !isUpgrade && beforeVersion && beforeVersion === afterVersion);
+
+			// 步骤 7: 记录安装后快照
 			createSnapshot(profileDir, 'after_install');
 
 			return {
@@ -199,7 +261,12 @@ export async function executePluginInstall(profileDir, rawSpec) {
 				spec,
 				installedPackage: installedPkgName,
 				preSnapshotId: preSnap?.id,
-				needRestart: true,
+				needRestart: isNewInstall || isUpgrade,
+				upgraded: isUpgrade,
+				isNewInstall,
+				fromVersion: beforeVersion,
+				toVersion: afterVersion,
+				isNoOp,
 				log: outputLog,
 			};
 		} catch (installErr) {

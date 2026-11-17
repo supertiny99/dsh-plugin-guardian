@@ -48,7 +48,28 @@ export function resolveProfileDir(customDir) {
 	if (process.env.DSH_PROFILE_DIR && fs.existsSync(process.env.DSH_PROFILE_DIR)) {
 		return path.resolve(process.env.DSH_PROFILE_DIR);
 	}
-	// 默认回退至 desktop profile
+
+	// 1. 优先从 process.argv 中探测宿主启动时显式传入的 profile 绝对路径
+	if (Array.isArray(process.argv)) {
+		for (const arg of process.argv) {
+			if (typeof arg === 'string' && arg.includes('profiles')) {
+				const candidate = path.resolve(arg);
+				if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'package.json'))) {
+					return candidate;
+				}
+			}
+		}
+	}
+
+	// 2. 检查 DSH_HOME 环境变量（如 Dev 沙盒模式 ~/.dsh-dev）
+	if (process.env.DSH_HOME) {
+		const homeCandidate = path.join(path.resolve(process.env.DSH_HOME), 'profiles', 'desktop');
+		if (fs.existsSync(homeCandidate)) {
+			return homeCandidate;
+		}
+	}
+
+	// 3. 默认回退至 desktop profile
 	return path.join(os.homedir(), '.dsh', 'profiles', 'desktop');
 }
 
